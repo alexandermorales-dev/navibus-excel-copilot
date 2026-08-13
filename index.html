@@ -39,7 +39,7 @@
         </select>
       </div>
       <div class="settings-row">
-        <button id="clearChatBtn" class="btn-secondary">Borrar conversación</button>
+        <button id="clearChatBtn" class="btn-secondary" data-i18n="clearChat">Borrar conversación</button>
       </div>
     </div>
 
@@ -48,8 +48,8 @@
       <div class="message assistant">
         <div class="message-avatar">AI</div>
         <div class="message-content">
-          <p>¡Hola! Soy tu Excel AI Copilot. Puedo ayudarte a crear informes, paneles de control, tablas, gráficos y más.</p>
-          <p class="hint">Ingresa tu API key de Gemini en Configuración para empezar.</p>
+          <p data-i18n="welcomeTitle">¡Hola! Soy tu Excel AI Copilot. Puedo ayudarte a crear informes, paneles de control, tablas, gráficos y más.</p>
+          <p class="hint" data-i18n="welcomeHint">Ingresa tu API key de Gemini en Configuración para empezar.</p>
         </div>
       </div>
     </div>
@@ -59,7 +59,7 @@
 
     <!-- Input area -->
     <div class="input-area">
-      <textarea id="messageInput" placeholder="Pídeme crear algo... (ej: crea un panel de control)" rows="2"></textarea>
+      <textarea id="messageInput" data-i18n-ph="placeholder" placeholder="Pídeme crear algo... (ej: crea un panel de control)" rows="2"></textarea>
       <button id="sendBtn" class="btn-send" title="Send" aria-label="Send" disabled>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="22" y1="2" x2="11" y2="13"/>
@@ -71,6 +71,7 @@
 
   <!-- Scripts -->
   <script src="js/config.js"></script>
+  <script src="js/i18n.js"></script>
   <script src="js/gemini.js"></script>
   <script src="js/schema.js"></script>
   <script src="js/actions.js"></script>

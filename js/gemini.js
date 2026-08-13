@@ -57,20 +57,20 @@ const Gemini = {
           if (isDaily) {
             return {
               ok: false,
-              error: 'Cuota diaria de Gemini agotada. Se reinicia a medianoche (hora del Pacífico).',
+              error: I18n.t('dailyQuota'),
               retry: false
             };
           }
 
           const waitSec = delay > 0 ? Math.min(delay, 65) : 20 * (attempt + 1);
-          App.showStatus(`Límite de tasa — esperando ${waitSec}s...`);
+          App.showStatus(I18n.tf('rateLimit', waitSec));
           await this.sleep(waitSec * 1000);
           App.hideStatus();
           continue;
         }
 
         if (resp.status >= 500) {
-          lastError = `Error del servidor ${resp.status}`;
+          lastError = I18n.tf('serverError', resp.status);
           await this.sleep(3000 * (attempt + 1));
           continue;
         }
@@ -85,15 +85,15 @@ const Gemini = {
 
       } catch (e) {
         if (e.name === 'AbortError') {
-          lastError = 'Tiempo de espera agotado (120s)';
+          lastError = I18n.t('timeout');
         } else {
-          lastError = `Error de red: ${e.message}`;
+          lastError = I18n.tf('networkError', e.message);
         }
         await this.sleep(2000 * (attempt + 1));
       }
     }
 
-    return { ok: false, error: lastError || 'Error desconocido tras reintentos', retry: false };
+    return { ok: false, error: lastError || I18n.t('unknownError'), retry: false };
   },
 
   /**
@@ -155,7 +155,7 @@ const Gemini = {
     let result = await this.generate(Config.model, systemPrompt, contents, 3, onThinking);
 
     if (!result.ok && result.retry !== false && Config.model !== Config.fallbackModel) {
-      App.showStatus('Modelo principal falló, probando alternativa...');
+      App.showStatus(I18n.t('fallbackModel'));
       result = await this.generate(Config.fallbackModel, systemPrompt, contents, 1, onThinking);
       App.hideStatus();
     }
