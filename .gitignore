@@ -1,0 +1,17 @@
+# Certificates (never commit)
+.certs/*.pem
+.certs/*.crt
+.certs/*.key
+.certs/*.pfx
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
