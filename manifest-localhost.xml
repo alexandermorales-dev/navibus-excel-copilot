@@ -5,10 +5,10 @@
            xsi:type="TaskPaneApp">
   <Id>7a3f9c2e-1b4d-4e8a-9f6c-3d2e1a0b5c7f</Id>
   <Version>1.0.0.0</Version>
-  <ProviderName>Navibus</ProviderName>
+  <ProviderName>Excel Copilot</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Navibus AI" />
-  <Description DefaultValue="Navibus AI — asistente inteligente para análisis y reportes de flota en Excel." />
+  <DisplayName DefaultValue="Excel AI Copilot" />
+  <Description DefaultValue="AI-powered assistant for creating reports, dashboards, tables, and charts in Excel." />
   <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png" />
   <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-80.png" />
   <SupportUrl DefaultValue="https://github.com/" />
@@ -73,13 +73,13 @@
         <bt:Url id="Taskpane.Url" DefaultValue="https://localhost:3000/index.html" />
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="Navibus AI" />
-        <bt:String id="GroupLabel" DefaultValue="Navibus" />
-        <bt:String id="CopilotButton.Label" DefaultValue="Navibus AI" />
+        <bt:String id="GetStarted.Title" DefaultValue="Excel AI Copilot" />
+        <bt:String id="GroupLabel" DefaultValue="AI Copilot" />
+        <bt:String id="CopilotButton.Label" DefaultValue="AI Copilot" />
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="Navibus AI — asistente para análisis y reportes de flota en Excel." />
-        <bt:String id="CopilotButton.Tooltip" DefaultValue="Abrir Navibus AI para analizar y crear reportes." />
+        <bt:String id="GetStarted.Description" DefaultValue="AI-powered assistant for creating reports, dashboards, tables, and charts in Excel." />
+        <bt:String id="CopilotButton.Tooltip" DefaultValue="Open the AI Copilot sidebar to chat with Gemini." />
       </bt:LongStrings>
     </Resources>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">

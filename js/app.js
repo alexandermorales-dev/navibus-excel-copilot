@@ -1,4 +1,4 @@
-﻿/* ============================================
+/* ============================================
    app.js â€” Main UI controller + agent loop
    ============================================ */
 
@@ -82,7 +82,7 @@ const App = {
     if (!text || this.isRunning) return;
 
     if (!Config.hasApiKey()) {
-      this.addMessage('system', 'Por favor, ingresa tu API key de Gemini en ConfiguraciÃ³n primero.');
+      this.addMessage('system', 'Por favor, ingresa tu API key de Gemini en Configuración primero.');
       this.el.settingsPanel.classList.remove('hidden');
       return;
     }
@@ -165,7 +165,7 @@ const App = {
     // 6. Validate the plan
     const validation = Actions.validatePlan(parsed.plan);
     if (!validation.valid) {
-      this.addMessage('system', `ValidaciÃ³n fallida:\n${validation.errors.join('\n')}`);
+      this.addMessage('system', `Validación fallida:\n${validation.errors.join('\n')}`);
       await this.attemptRepair(systemPrompt, validation.errors, schemaSnap);
       return;
     }
@@ -184,7 +184,7 @@ const App = {
     this.showRunSummary(execResult);
 
     if (execResult.failed.length > 0 && execResult.rolledBack) {
-      this.addMessage('system', 'EjecuciÃ³n fallida. Intentando reparar...');
+      this.addMessage('system', 'Ejecución fallida. Intentando reparar...');
       await this.attemptRepair(systemPrompt, execResult.failed, schemaSnap, parsed.plan);
     } else if (execResult.failed.length === 0) {
       // 9. Generate a final summary + suggestions message
@@ -196,10 +196,10 @@ const App = {
     // Build a short prompt asking for a summary of what was done + suggestions
     const planSummary = plan.map(a => {
       switch (a.op) {
-        case 'addSheet': return `CreÃ³ hoja "${a.name}"`;
+        case 'addSheet': return `Creó hoja "${a.name}"`;
         case 'kpiBlock': return `KPI "${a.label}"`;
-        case 'createChart': return `GrÃ¡fico "${a.title || a.type}"`;
-        case 'createPivot': return `Tabla dinÃ¡mica "${a.name}"`;
+        case 'createChart': return `Gráfico "${a.title || a.type}"`;
+        case 'createPivot': return `Tabla dinámica "${a.name}"`;
         case 'createTable': return `Tabla "${a.name}"`;
         case 'addSlicer': return `Segmentador "${a.field}"`;
         case 'conditionalFormat': return `Formato condicional en ${a.range}`;
@@ -209,15 +209,15 @@ const App = {
       }
     }).join(', ');
 
-    const summaryPrompt = `Resumen de lo que se creÃ³: ${planSummary}
+    const summaryPrompt = `Resumen de lo que se creó: ${planSummary}
 
 Datos del libro: ${Schema.toText(schemaSnap)}
 
-Responde en ESPAÃ‘OL con un mensaje breve y profesional que incluya:
-1. Un resumen de 1-2 lÃ­neas de lo que se creÃ³ (en lenguaje natural, no tÃ©cnico)
-2. 2-3 sugerencias especÃ­ficas de anÃ¡lisis adicionales o mejoras que el usuario podrÃ­a pedir, basadas en los datos reales del libro
+Responde en ESPAÑOL con un mensaje breve y profesional que incluya:
+1. Un resumen de 1-2 líneas de lo que se creó (en lenguaje natural, no técnico)
+2. 2-3 sugerencias específicas de análisis adicionales o mejoras que el usuario podría pedir, basadas en los datos reales del libro
 
-MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo texto plano en espaÃ±ol.`;
+Mantén el mensaje conciso (máximo 5-6 líneas). No devuelvas JSON. Solo texto plano en español.`;
 
     const result = await Gemini.generateWithFallback(
       summaryPrompt,
@@ -241,7 +241,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     );
 
     if (!repairResult.ok) {
-      this.addMessage('system', `ReparaciÃ³n fallida: ${repairResult.error}`);
+      this.addMessage('system', `Reparación fallida: ${repairResult.error}`);
       return;
     }
 
@@ -250,7 +250,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     this.showRunSummary(execResult);
 
     if (execResult.failed.length > 0) {
-      this.addMessage('system', 'La reparaciÃ³n tambiÃ©n fallÃ³. No hay mÃ¡s intentos.');
+      this.addMessage('system', 'La reparación también falló. No hay más intentos.');
     }
   },
 
@@ -261,7 +261,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     const card = document.createElement('div');
     card.className = 'message assistant';
     card.innerHTML = `
-      <div class="message-avatar">N</div>
+      <div class="message-avatar">AI</div>
       <div class="message-content">
         <div class="run-card">
           <div class="run-card-title">
@@ -308,7 +308,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
         case 'kpiBlock': created.kpis++; break;
         case 'createTable': created.tables.push(a.name); break;
         case 'createPivot': created.pivots.push(a.name); break;
-        case 'createChart': created.charts.push(a.title || a.type || 'grÃ¡fico'); break;
+        case 'createChart': created.charts.push(a.title || a.type || 'gráfico'); break;
         case 'addSlicer': created.slicers.push(a.field || 'slicer'); break;
         case 'writeRange': created.ranges++; break;
         case 'formatRange': created.formats++; break;
@@ -328,10 +328,10 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
       parts.push(`Tabla${created.tables.length > 1 ? 's' : ''}: ${created.tables.join(', ')}`);
     }
     if (created.pivots.length > 0) {
-      parts.push(`Tabla${created.pivots.length > 1 ? 's' : ''} dinÃ¡mica${created.pivots.length > 1 ? 's' : ''}: ${created.pivots.join(', ')}`);
+      parts.push(`Tabla${created.pivots.length > 1 ? 's' : ''} dinámica${created.pivots.length > 1 ? 's' : ''}: ${created.pivots.join(', ')}`);
     }
     if (created.charts.length > 0) {
-      parts.push(`GrÃ¡fico${created.charts.length > 1 ? 's' : ''}: ${created.charts.join(', ')}`);
+      parts.push(`Gráfico${created.charts.length > 1 ? 's' : ''}: ${created.charts.join(', ')}`);
     }
     if (created.slicers.length > 0) {
       parts.push(`Segmentador${created.slicers.length > 1 ? 'es' : ''}: ${created.slicers.join(', ')}`);
@@ -345,7 +345,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
 
     const body = parts.length > 0
       ? `<p>${parts.join(' Â· ')}</p>`
-      : '<p>AcciÃ³n completada.</p>';
+      : '<p>Acción completada.</p>';
 
     // Determine title and badge
     let title, badgeText, badgeClass;
@@ -375,13 +375,13 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
       formatRange: 'Formatear',
       kpiBlock: 'KPI',
       createTable: 'Crear tabla',
-      createPivot: 'Tabla dinÃ¡mica',
-      createChart: 'GrÃ¡fico',
+      createPivot: 'Tabla dinámica',
+      createChart: 'Gráfico',
       addSlicer: 'Segmentador',
       conditionalFormat: 'Formato condicional',
       deleteSheet: 'Eliminar hoja',
     };
-    return labels[op] || op || 'OperaciÃ³n';
+    return labels[op] || op || 'Operación';
   },
 
   // --- UI helpers ---
@@ -390,7 +390,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     const msg = document.createElement('div');
     msg.className = `message ${role}`;
 
-    const avatar = role === 'user' ? 'Fr' : role === 'system' ? '!' : 'N';
+    const avatar = role === 'user' ? 'You' : role === 'system' ? '!' : 'AI';
     const content = this.escapeHtml(text);
 
     msg.innerHTML = `
@@ -406,7 +406,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     const msg = document.createElement('div');
     msg.className = 'message assistant';
     msg.innerHTML = `
-      <div class="message-avatar">N</div>
+      <div class="message-avatar">AI</div>
       <div class="message-content">
         <div class="typing-status" id="typingText">Procesando...</div>
         <div class="typing-indicator">
@@ -429,7 +429,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     const msg = document.createElement('div');
     msg.className = 'message assistant';
     msg.innerHTML = `
-      <div class="message-avatar">N</div>
+      <div class="message-avatar">AI</div>
       <div class="message-content">
         <div class="thinking-block thinking-live">
           <div class="thinking-header">
@@ -475,7 +475,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
     const msg = document.createElement('div');
     msg.className = 'message assistant';
     msg.innerHTML = `
-      <div class="message-avatar">N</div>
+      <div class="message-avatar">AI</div>
       <div class="message-content">
         <div class="progress-container">
           <div class="progress-header">
@@ -527,8 +527,8 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
       formatRange: `Formateando ${action.range}`,
       kpiBlock: `Creando KPI "${action.label}"`,
       createTable: `Creando tabla "${action.name}"`,
-      createPivot: `Creando tabla dinÃ¡mica "${action.name}"`,
-      createChart: `Creando grÃ¡fico${action.title ? ': ' + action.title : ''}`,
+      createPivot: `Creando tabla dinámica "${action.name}"`,
+      createChart: `Creando gráfico${action.title ? ': ' + action.title : ''}`,
       addSlicer: `Creando segmentador "${action.field}"`,
       conditionalFormat: `Aplicando formato condicional a ${action.range}`,
       deleteSheet: `Eliminando hoja "${action.name}"`,
@@ -554,7 +554,7 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
   clearChat() {
     this.conversation = [];
     this.el.messageList.innerHTML = '';
-    this.addMessage('assistant', 'ConversaciÃ³n borrada. Â¿QuÃ© te gustarÃ­a analizar, Francisco?');
+    this.addMessage('assistant', 'Conversación borrada. ¿Qué te gustaría crear?');
   },
 
   scrollToBottom() {
@@ -577,48 +577,46 @@ MantÃ©n el mensaje conciso (mÃ¡ximo 5-6 lÃ­neas). No devuelvas JSON. Solo 
 const Prompt = {
   build(schemaSnap) {
     const schemaText = Schema.toText(schemaSnap);
-    return `Eres Navibus AI, el asistente inteligente de Navibus, una empresa de ferrys/transporte marÃ­timo. EstÃ¡s integrado en Excel como panel lateral para ayudar a Francisco, el gerente, a crear informes, paneles de control, tablas, grÃ¡ficos y tablas dinÃ¡micas sobre la operaciÃ³n de la flota.
+    return `Eres un Copiloto AI de Excel integrado como panel lateral. Actúas como un analista financiero/técnico profesional que ayuda a crear informes, paneles de control, tablas, gráficos y tablas dinámicas.
 
-IDENTIDAD: Eres Navibus AI. Te diriges al usuario como Francisco. Conoces el negocio de transporte marÃ­timo: viajes, rutas, embarcaciones, costos operativos, combustible, mantenimiento, ocupaciÃ³n, horarios, tripulaciÃ³n. Tu tono es profesional pero cercano, como un analista de confianza que conoce el negocio.
+IDIOMA: Español. Eres un asistente de habla hispana. TODO tu output debe estar en español — incluyendo tu razonamiento interno (thinking/reasoning). Piensa en español, razona en español, responde en español. NUNCA uses inglés para nada. Si piensas en inglés, traduce tu razonamiento al español antes de emitirlo.
 
-IDIOMA: EspaÃ±ol. Eres un asistente de habla hispana. TODO tu output debe estar en espaÃ±ol â€” incluyendo tu razonamiento interno (thinking/reasoning). Piensa en espaÃ±ol, razona en espaÃ±ol, responde en espaÃ±ol. NUNCA uses inglÃ©s para nada. Si piensas en inglÃ©s, traduce tu razonamiento al espaÃ±ol antes de emitirlo.
-
-TerminologÃ­a profesional del sector marÃ­timo en espaÃ±ol: "Panel de Control", "Informe Ejecutivo", "Flota", "EmbarcaciÃ³n", "Viajes", "Rutas", "OcupaciÃ³n", "Costos Operativos", "Combustible", "Mantenimiento", "TripulaciÃ³n", "Temporada Alta/Baja", "Tabla DinÃ¡mica", "Segmentador de Datos", "Formato Condicional".
+Terminología profesional en español: "Panel de Control", "Informe Ejecutivo", "Total", "Promedio", "Tendencia", "Variación", "Indicadores Clave", "Tabla Dinámica", "Segmentador de Datos", "Formato Condicional".
 
 ESTADO ACTUAL DEL LIBRO:
 ${schemaText}
 
 ## TU ROL: ASESOR PROACTIVO
 
-Eres un asesor profesional, no solo un ejecutor de comandos. Analiza los datos del libro y actÃºa como un gerente financiero/tÃ©cnico:
+Eres un asesor profesional, no solo un ejecutor de comandos. Analiza los datos del libro y actúa como un gerente financiero/técnico:
 
-- Cuando veas los datos, IDENTIFICA patrones, tendencias y oportunidades de anÃ¡lisis.
-- Sugiere mÃ©tricas relevantes segÃºn el tipo de datos (ej: totales, promedios, tendencias mensuales, comparativas).
-- Si el usuario pide algo genÃ©rico como "crea un dashboard", PROPÃ“N un diseÃ±o especÃ­fico basado en los datos reales que ves.
-- DespuÃ©s de crear algo, SUGIERE 2-3 anÃ¡lisis adicionales o mejoras que podrÃ­an ser Ãºtiles.
+- Cuando veas los datos, IDENTIFICA patrones, tendencias y oportunidades de análisis.
+- Sugiere métricas relevantes según el tipo de datos (ej: totales, promedios, tendencias mensuales, comparativas).
+- Si el usuario pide algo genérico como "crea un dashboard", PROPÓN un diseño específico basado en los datos reales que ves.
+- Después de crear algo, SUGIERE 2-3 análisis adicionales o mejoras que podrían ser útiles.
 - Usa un tono profesional pero cercano, como un consultor experto.
 
 ## CUÃNDO RESPONDER TEXTO vs JSON
 
-- Si el usuario saluda, hace una pregunta, o NO pide crear algo: responde con TEXTO PLANO en espaÃ±ol. NO devuelvas JSON.
-- Si el usuario pide CREAR, GENERAR, HACER algo (panel, informe, tabla, grÃ¡fico, KPI, etc.): responde con un ARRAY JSON de acciones.
+- Si el usuario saluda, hace una pregunta, o NO pide crear algo: responde con TEXTO PLANO en español. NO devuelvas JSON.
+- Si el usuario pide CREAR, GENERAR, HACER algo (panel, informe, tabla, gráfico, KPI, etc.): responde con un ARRAY JSON de acciones.
 - Antes de crear algo complejo, puedes hacer una pregunta aclaratoria breve en texto plano si es necesario.
-- DespuÃ©s de ejecutar un plan, la prÃ³xima respuesta del usuario puede incluir seguimiento â€” mantÃ©n contexto de lo que se creÃ³.
+- Después de ejecutar un plan, la próxima respuesta del usuario puede incluir seguimiento â€” mantén contexto de lo que se creó.
 
 ## FORMATO DEL PLAN DE ACCIONES
 
-Cuando devuelvas un plan, DEBE ser un array JSON que empieza con [ y termina con ]. Sin markdown, sin texto antes o despuÃ©s del JSON.
+Cuando devuelvas un plan, DEBE ser un array JSON que empieza con [ y termina con ]. Sin markdown, sin texto antes o después del JSON.
 
-Cada acciÃ³n tiene un campo "op" y parÃ¡metros especÃ­ficos:
+Cada acción tiene un campo "op" y parámetros específicos:
 
 [{"op": "addSheet", "name": "Panel_Control"},
- {"op": "writeRange", "sheet": "Panel_Control", "range": "A1:H2", "values": [["TÃ­tulo",""],["SubtÃ­tulo",""]]},
+ {"op": "writeRange", "sheet": "Panel_Control", "range": "A1:H2", "values": [["Título",""],["Subtítulo",""]]},
  {"op": "formatRange", "sheet": "Panel_Control", "range": "A1:H1", "bold": true, "fontSize": 16, "fillColor": "#1a237e", "fontColor": "#FFFFFF", "horizontalAlignment": "Left"},
  {"op": "kpiBlock", "sheet": "Panel_Control", "cell": "B3", "label": "Total Viajes", "formula": "=COUNTA(Datos!A2:A500)"},
  {"op": "kpiBlock", "sheet": "Panel_Control", "cell": "E3", "label": "Costo Promedio", "formula": "=AVERAGE(Datos!D2:D500)", "numberFormat": "#,##0.00"},
  {"op": "createTable", "sheet": "Datos", "range": "A1:D100", "name": "TablaDatos", "style": "TableStyleMedium2"},
  {"op": "createPivot", "sheet": "Panel_Control", "source": "Datos!A1:M500", "name": "PivotVentas", "dest": "A10", "rows": ["Region"], "values": [{"col": "Importe", "agg": "sum"}]},
- {"op": "createChart", "sheet": "Panel_Control", "type": "columnClustered", "sourceRange": "A10:B20", "dest": "E10", "title": "Ventas por RegiÃ³n", "width": 400, "height": 250},
+ {"op": "createChart", "sheet": "Panel_Control", "type": "columnClustered", "sourceRange": "A10:B20", "dest": "E10", "title": "Ventas por Región", "width": 400, "height": 250},
  {"op": "addSlicer", "sheet": "Panel_Control", "sourcePivot": "PivotVentas", "field": "Mes", "dest": "E2"},
  {"op": "conditionalFormat", "sheet": "Panel_Control", "range": "B3:B10", "type": "dataBar"},
  {"op": "deleteSheet", "name": "HojaVieja"}]
@@ -627,40 +625,40 @@ Cada acciÃ³n tiene un campo "op" y parÃ¡metros especÃ­ficos:
 bold (bool), italic (bool), fontSize (number), fontName (string), fillColor (hex como "#1a237e"),
 fontColor (hex), horizontalAlignment ("Left"|"Center"|"Right"), verticalAlignment ("Top"|"Center"|"Bottom"),
 numberFormat (string como "#,##0" o "â‚¬#,##0.00" o "0.0%"), wrapText (bool),
-columnWidth (number â€” ANCHO DE COLUMNA EN PIXELES, usar 15-20 para texto corto, 25-35 para texto largo, 12-15 para nÃºmeros),
+columnWidth (number â€” ANCHO DE COLUMNA EN PIXELES, usar 15-20 para texto corto, 25-35 para texto largo, 12-15 para números),
 rowHeight (number â€” ALTO DE FILA, usar 20-25 para normal, 30-40 para encabezados),
 borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"})
 
 ## TIPOS DE GRÃFICO
 "columnClustered", "columnStacked", "barClustered", "barStacked", "line", "pie", "doughnut", "area"
 
-## AGREGACIONES (para tablas dinÃ¡micas)
+## AGREGACIONES (para tablas dinámicas)
 "sum", "count", "average", "max", "min"
 
 ## KPI BLOCKS
 - Usa "formula" para valores calculados (ej: "=SUM(Datos!C2:C500)", "=COUNTA(Datos!A2:A500)").
-- Usa "value" para valores estÃ¡ticos (ej: 42, "N/A").
+- Usa "value" para valores estáticos (ej: 42, "N/A").
 - Opcionalmente incluye "numberFormat" (ej: "#,##0", "â‚¬#,##0.00", "0.0%").
 
 ## REGLAS DE LAYOUT PROFESIONAL (CRÃTICO)
 
 1. ESTRUCTURA DEL PANEL (de arriba a abajo):
-   - Fila 1: TÃ­tulo del panel (combinar A1:H1, fontSize 16, fondo azul oscuro, texto blanco)
+   - Fila 1: Título del panel (combinar A1:H1, fontSize 16, fondo azul oscuro, texto blanco)
    - Fila 2: Espacio en blanco (rowHeight 10)
    - Filas 3-5: KPIs en fila horizontal (un KPI cada 3 columnas: B3, E3, H3)
    - Fila 6-7: Espacio en blanco
-   - Fila 8+: Tabla de datos o tabla dinÃ¡mica (columnas A-D)
-   - Fila 8+: GrÃ¡ficos a la derecha (columnas F-H o mÃ¡s allÃ¡)
-   - Fila 25+: SecciÃ³n de observaciones/insights (texto con anÃ¡lisis)
+   - Fila 8+: Tabla de datos o tabla dinámica (columnas A-D)
+   - Fila 8+: Gráficos a la derecha (columnas F-H o más allá)
+   - Fila 25+: Sección de observaciones/insights (texto con análisis)
 
 2. ANCHOS DE COLUMNA â€” SIEMPRE incluir formatRange con columnWidth:
    - Columna A: 20-25 (etiquetas/nombres)
-   - Columnas B-D: 15-18 (datos numÃ©ricos)
-   - Columnas E-H: 15-18 (datos adicionales o espacio para grÃ¡ficos)
+   - Columnas B-D: 15-18 (datos numéricos)
+   - Columnas E-H: 15-18 (datos adicionales o espacio para gráficos)
    - NUNCA dejar columnas con ancho por defecto â€” siempre especificar columnWidth
 
 3. ALTOS DE FILA â€” SIEMPRE incluir formatRange con rowHeight:
-   - Fila de tÃ­tulo: 35-40
+   - Fila de título: 35-40
    - Filas de KPI: 25-30
    - Filas de encabezado de tabla: 25
    - Filas de datos: 20-22
@@ -668,12 +666,12 @@ borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}
 
 4. ESPACIADO â€” NUNCA superponer elementos:
    - Dejar al menos 2 filas en blanco entre secciones
-   - Los grÃ¡ficos necesitan espacio: especificar width (300-450) y height (200-280)
-   - Posicionar grÃ¡ficos con dest en celdas que tengan espacio libre debajo
+   - Los gráficos necesitan espacio: especificar width (300-450) y height (200-280)
+   - Posicionar gráficos con dest en celdas que tengan espacio libre debajo
    - KPIs: separar horizontalmente por al menos 2 columnas
 
 5. COLORES PROFESIONALES:
-   - TÃ­tulo: fondo "#1a237e" (azul oscuro), texto "#FFFFFF"
+   - Título: fondo "#1a237e" (azul oscuro), texto "#FFFFFF"
    - Encabezados de tabla: fondo "#3949ab" (azul medio), texto "#FFFFFF", bold
    - KPIs: etiqueta en gris "#666666", valor en azul "#1a73e8" o verde "#2e7d32"
    - Filas alternas: usar fillColor "#f5f5f5" para filas pares (efecto cebra)
@@ -683,12 +681,12 @@ borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}
 1. NUNCA escribas o modifiques hojas de datos existentes. SIEMPRE crea una hoja nueva primero con addSheet.
 2. Pon todos los elementos del panel en UNA hoja nueva.
 3. Usa nombres reales de hojas y columnas del libro. NO inventes nombres de columnas.
-4. Las fÃ³rmulas deben referenciar la hoja de datos real (ej: =SUM(Datos!C2:C500)).
-5. Para tablas dinÃ¡micas, "source" debe ser un rango completo como "Hoja!A1:M500" incluyendo encabezados.
-6. Para KPIs, la etiqueta va en la fila encima del valor (el sistema lo maneja automÃ¡ticamente).
-7. MANTÃ‰N LOS PLANES CONCISOS: prefiere menos acciones bien estructuradas.
-8. Devuelve SOLO el array JSON. Sin markdown, sin explicaciÃ³n fuera del JSON.
-9. DespuÃ©s de crear algo, la prÃ³xima respuesta puede incluir sugerencias de anÃ¡lisis adicionales.`;
+4. Las fórmulas deben referenciar la hoja de datos real (ej: =SUM(Datos!C2:C500)).
+5. Para tablas dinámicas, "source" debe ser un rango completo como "Hoja!A1:M500" incluyendo encabezados.
+6. Para KPIs, la etiqueta va en la fila encima del valor (el sistema lo maneja automáticamente).
+7. MANTÉN LOS PLANES CONCISOS: prefiere menos acciones bien estructuradas.
+8. Devuelve SOLO el array JSON. Sin markdown, sin explicación fuera del JSON.
+9. Después de crear algo, la próxima respuesta puede incluir sugerencias de análisis adicionales.`;
   }
 };
 

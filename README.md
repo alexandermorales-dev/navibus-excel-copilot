@@ -1,15 +1,15 @@
-# Navibus AI Copilot
+# Excel AI Copilot
 
-An intelligent Excel add-in for **Navibus** (a ferry/maritime transport company). It uses Google's Gemini API to create reports, dashboards, tables, charts, and pivot tables from fleet operational data — without generating or injecting VBA code.
+An intelligent Excel add-in that uses Google's Gemini API to create reports, dashboards, tables, charts, and pivot tables — without generating or injecting VBA code.
 
 ## How it works
 
-1. You type a request in the sidebar (e.g., "crea un panel de control con KPIs de la flota").
+1. You type a request in the sidebar (e.g., "crea un panel de control con KPIs").
 2. The add-in reads the workbook structure (sheet names, headers, data types).
 3. Gemini returns a **JSON action plan** (validated, not raw code).
 4. A deterministic executor performs each action via Office.js — no compile errors, ever.
 5. If an action fails, it rolls back all changes and attempts one automatic repair round.
-6. On success, Navibus AI generates a summary in Spanish with suggestions for follow-up analysis.
+6. On success, the assistant generates a summary in Spanish with suggestions for follow-up analysis.
 
 ## Features
 
@@ -18,7 +18,7 @@ An intelligent Excel add-in for **Navibus** (a ferry/maritime transport company)
 - **Executive summary**: On completion, shows what was created and suggests next analyses.
 - **Professional layout**: Automatic column widths, row heights, and element spacing — no overlapping data.
 - **Auto-repair**: If an action fails, rolls back everything and retries with error context.
-- **Maritime theme**: Dark UI with ocean-blue accents and Navibus branding.
+- **Dark theme**: Modern dark UI with blue accents.
 - **Quota handling**: Detects rate limits (429) and daily quota exhaustion with clear messages.
 - **Spanish-first**: All UI text, responses, reasoning, and suggestions are in Spanish.
 
@@ -33,7 +33,6 @@ An intelligent Excel add-in for **Navibus** (a ferry/maritime transport company)
 ### 1. Start the dev server
 
 ```bash
-cd C:\Users\Alex\Desktop\Projects\excel-copilot
 python dev_server.py
 ```
 
@@ -46,7 +45,7 @@ The server runs on `https://localhost:3000` with self-signed SSL certificates (r
 1. Open Excel.
 2. Go to **Insert** → **Add-ins** → **Manage My Add-ins** → **Upload My Add-in**.
 3. Select `manifest-localhost.xml`.
-4. The **Navibus AI** button appears on the Home tab.
+4. The **AI Copilot** button appears on the Home tab.
 
 ### 3. Enter your API key
 
@@ -61,7 +60,7 @@ Once hosted on GitHub Pages:
 
 1. Push this project to a GitHub repository.
 2. Enable **GitHub Pages** (Settings → Pages → Source: main branch, root).
-3. Edit `manifest.xml` — replace `YOUR_GITHUB_USERNAME` with your GitHub username.
+3. Edit `manifest.xml` — replace `YOUR_GITHUB_USERNAME` with your GitHub username and `YOUR_REPO_NAME` with your repo name.
 4. Share `manifest.xml` with the other person.
 5. They open Excel → **Insert** → **Add-ins** → **Upload My Add-in** → select the file.
 6. They enter their own Gemini API key in settings.
@@ -71,12 +70,11 @@ No installer, no Node.js, no build step on their end.
 ## Project structure
 
 ```
-excel-copilot/
 ├── manifest.xml              # For GitHub Pages (sharing)
 ├── manifest-localhost.xml    # For local development
 ├── index.html                # Task pane entry point
 ├── css/
-│   └── style.css             # Dark maritime-themed UI
+│   └── style.css             # Dark-themed UI
 ├── js/
 │   ├── config.js             # Settings (API key, model) in localStorage
 │   ├── gemini.js             # Gemini API client (streaming, 429, fallback)
