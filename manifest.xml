@@ -22,7 +22,7 @@
     <SourceLocation DefaultValue="https://alexandermorales-dev.github.io/navibus-excel-copilot/index.html" />
   </DefaultSettings>
   <Permissions>ReadWriteDocument</Permissions>
-  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides" xsi:type="VersionOverridesV1_0">
+  <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
     <Hosts>
       <Host xsi:type="Workbook">
         <DesktopFormFactor>
@@ -82,46 +82,5 @@
         <bt:String id="CopilotButton.Tooltip" DefaultValue="Open the AI Copilot sidebar to chat with Gemini." />
       </bt:LongStrings>
     </Resources>
-    <VersionOverrides xmlns="http://schemas.microsoft.com/office/taskpaneappversionoverrides/1.1" xsi:type="VersionOverridesV1_1">
-      <Hosts>
-        <Host xsi:type="Workbook">
-          <DesktopFormFactor>
-            <GetStarted>
-              <Title resid="GetStarted.Title" />
-              <Description resid="GetStarted.Description" />
-              <LearnMoreUrl resid="GetStarted.LearnMoreUrl" />
-            </GetStarted>
-            <ExtensionPoint xsi:type="PrimaryCommandSurface">
-              <OfficeTab id="TabHome">
-                <Group id="CopilotGroup">
-                  <Label resid="GroupLabel" />
-                  <Icon>
-                    <bt:Image size="16" resid="Icon.16x16" />
-                    <bt:Image size="32" resid="Icon.32x32" />
-                    <bt:Image size="80" resid="Icon.80x80" />
-                  </Icon>
-                  <Control xsi:type="Button" id="CopilotButton">
-                    <Label resid="CopilotButton.Label" />
-                    <Supertip>
-                      <Title resid="CopilotButton.Label" />
-                      <Description resid="CopilotButton.Tooltip" />
-                    </Supertip>
-                    <Icon>
-                      <bt:Image size="16" resid="Icon.16x16" />
-                      <bt:Image size="32" resid="Icon.32x32" />
-                      <bt:Image size="80" resid="Icon.80x80" />
-                    </Icon>
-                    <Action xsi:type="ShowTaskpane">
-                      <TaskpaneId>CopilotTaskpane</TaskpaneId>
-                      <SourceLocation resid="Taskpane.Url" />
-                    </Action>
-                  </Control>
-                </Group>
-              </OfficeTab>
-            </ExtensionPoint>
-          </DesktopFormFactor>
-        </Host>
-      </Hosts>
-    </VersionOverrides>
   </VersionOverrides>
 </OfficeApp>
