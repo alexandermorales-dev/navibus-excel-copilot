@@ -83,8 +83,8 @@ const Schema = {
 
     if (isHeader) {
       headers = firstRow.map(v => String(v));
-      // Sample up to 3 data rows
-      const sampleCount = Math.min(3, rowCount - 1);
+      // Sample up to 10 data rows so the LLM can see deeper data
+      const sampleCount = Math.min(10, rowCount - 1);
       for (let i = 1; i <= sampleCount; i++) {
         if (values[i]) {
           sampleRows.push(values[i].map(v => this.formatValue(v)));
@@ -93,8 +93,8 @@ const Schema = {
       // Infer column types from formats + sample data
       columnTypes = this.inferColumnTypes(headers, values, safeFormats);
     } else {
-      // No clear header — show first 3 rows as data
-      const sampleCount = Math.min(3, rowCount);
+      // No clear header — show first 10 rows as data
+      const sampleCount = Math.min(10, rowCount);
       for (let i = 0; i < sampleCount; i++) {
         if (values[i]) {
           sampleRows.push(values[i].map(v => this.formatValue(v)));
@@ -174,7 +174,7 @@ const Schema = {
         lines.push(`  - "${s.name}": empty sheet`);
         continue;
       }
-      lines.push(`  - "${s.name}": ${s.rows} rows × ${s.cols} cols`);
+      lines.push(`  - "${s.name}": ${s.rows} rows × ${s.cols} cols (used range: ${s.address})`);
       if (s.hasHeaders) {
         lines.push(`    Headers: [${s.headers.map(h => `"${h}"`).join(', ')}]`);
         if (s.columnTypes.length > 0) {

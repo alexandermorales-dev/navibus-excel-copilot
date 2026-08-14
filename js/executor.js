@@ -110,21 +110,31 @@ const Executor = {
         const valRows = action.values.length;
         const valCols = action.values[0] ? action.values[0].length : 0;
 
+        // Detect if any cell value is a formula (starts with =)
+        const hasFormulas = action.values.some(row =>
+          Array.isArray(row) && row.some(v => typeof v === 'string' && v.startsWith('='))
+        );
+
+        // Determine the target range (may need auto-resize)
+        let targetRange;
         if (valRows !== range.rowCount || valCols !== range.columnCount) {
-          // Auto-resize the range to match the values array
-          // Parse the start cell from the range address
           const startCell = action.range.split(':')[0];
           const endCell = this.offsetRange(startCell, valRows - 1, valCols - 1);
-          const correctRange = sheet.getRange(`${startCell}:${endCell}`);
-          correctRange.values = action.values;
-          if (action.numberFormat) {
-            correctRange.numberFormat = action.numberFormat;
-          }
+          targetRange = sheet.getRange(`${startCell}:${endCell}`);
         } else {
-          range.values = action.values;
-          if (action.numberFormat) {
-            range.numberFormat = action.numberFormat;
-          }
+          targetRange = range;
+        }
+
+        if (hasFormulas) {
+          // Use .formulas so Excel evaluates formula strings (e.g. "=LC!E15")
+          // Non-formula cells in the array are treated as literal values by Excel
+          targetRange.formulas = action.values;
+        } else {
+          targetRange.values = action.values;
+        }
+
+        if (action.numberFormat) {
+          targetRange.numberFormat = action.numberFormat;
         }
         await ctx.sync();
       });
