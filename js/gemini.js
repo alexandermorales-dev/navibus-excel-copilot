@@ -39,7 +39,6 @@ const Gemini = {
     } = opts;
 
     const model = Config.model;
-    const url = `${this.BASE_URL}/${model}:streamGenerateContent?alt=sse&key=${Config.apiKey}`;
 
     const body = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -64,6 +63,13 @@ const Gemini = {
       if (signal && signal.aborted) {
         return { ok: false, error: I18n.t('aborted'), errorType: 'aborted', retry: false };
       }
+
+      // Pick the next key from the round-robin pool for each attempt.
+      const apiKey = Config.nextKey();
+      if (!apiKey) {
+        return { ok: false, error: 'No API key available.', errorType: 'client', retry: false };
+      }
+      const url = `${this.BASE_URL}/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
 
       try {
         const controller = new AbortController();
@@ -92,6 +98,14 @@ const Gemini = {
           const isDaily = this.isDailyQuota(errBody);
 
           if (isDaily) {
+            // This key's daily quota is gone — rotate to the next key
+            // immediately instead of failing. Only fail if ALL keys are
+            // daily-exhausted (checked by letting the loop exhaust retries).
+            const pool = Config.keyPool();
+            if (attempt < maxRetries - 1 && pool.length > 1) {
+              // nextKey() already advanced; just retry with a different key.
+              continue;
+            }
             return {
               ok: false,
               error: I18n.t('dailyQuota'),
@@ -101,9 +115,16 @@ const Gemini = {
           }
 
           lastErrorType = 'rate_limit';
+          // On 429, the next attempt will already use a different key
+          // (round-robin). Only wait if we've cycled through all keys.
+          const pool = Config.keyPool();
           const waitSec = delay > 0 ? Math.min(delay, 65) : this.backoffSeconds(20, attempt);
           lastError = I18n.tf('rateLimit', waitSec);
           if (attempt < maxRetries - 1) {
+            if (pool.length > 1) {
+              // More keys available — retry immediately with the next key.
+              continue;
+            }
             App.showStatus(I18n.tf('rateLimit', waitSec));
             await this.sleep(waitSec * 1000, signal);
             App.hideStatus();

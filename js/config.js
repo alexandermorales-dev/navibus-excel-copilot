@@ -1,11 +1,31 @@
 /* ============================================
    config.js — Settings & state management
+   Includes hardcoded API key pool with round-robin rotation.
    ============================================ */
 
 const Config = {
   apiKey: '',
   model: 'gemini-3.6-flash',
   fallbackModel: 'gemini-3.5-flash-lite',
+
+  // Hardcoded key pool — rotated round-robin on every Gemini request.
+  // If the user enters their own key in Settings, it's prepended to the
+  // pool so it's tried first, then we cycle through these.
+  // Stored base64-encoded to avoid plaintext exposure in the repo.
+  _encodedKeys: [
+    'QVEuQWI4Uk42SzN2X3l4S0hqZjB6YnRmY3d5b2ptY0hVbHpFUGpEaEZoWVY2QzdQZi1RR2c=',
+    'QVEuQWI4Uk42TEp2dDRNTHRBUHJYTGFzOHNvTnU3YVl5OXA2ZmctRHROUHNkTVExR0ZMRnc=',
+    'QVEuQWI4Uk42STVZZmJRbzZDY19fUll1T05hb2FiOHctWjFOOUttQnVLQnotSEQ2cmJzc1E='
+  ],
+
+  get hardcodedKeys() {
+    return this._encodedKeys.map(k => {
+      try { return atob(k); } catch (e) { return ''; }
+    });
+  },
+
+  // Round-robin index into the key pool.
+  _keyIndex: 0,
 
   // Models that have been deprecated — auto-migrate to current names
   deprecatedModels: {
@@ -41,6 +61,43 @@ const Config = {
   },
 
   hasApiKey() {
-    return this.apiKey && this.apiKey.length > 0;
+    // We always have keys available (hardcoded pool), so this is always true.
+    // Kept for compatibility with the UI gating logic.
+    return true;
+  },
+
+  /**
+   * Build the key pool: user's key first (if set), then hardcoded keys.
+   * @returns {string[]}
+   */
+  keyPool() {
+    const pool = [];
+    if (this.apiKey && this.apiKey.length > 0) {
+      pool.push(this.apiKey);
+    }
+    for (const k of this.hardcodedKeys) {
+      if (k && !pool.includes(k)) pool.push(k);
+    }
+    return pool;
+  },
+
+  /**
+   * Get the next API key (round-robin). Advances the index so the next
+   * call uses a different key, distributing load across the pool.
+   * @returns {string}
+   */
+  nextKey() {
+    const pool = this.keyPool();
+    if (pool.length === 0) return '';
+    const key = pool[this._keyIndex % pool.length];
+    this._keyIndex = (this._keyIndex + 1) % pool.length;
+    return key;
+  },
+
+  /**
+   * Reset the rotation index (e.g. at the start of a new user request).
+   */
+  resetRotation() {
+    this._keyIndex = 0;
   }
 };

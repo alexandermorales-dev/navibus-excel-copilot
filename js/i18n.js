@@ -32,8 +32,8 @@ const I18n = {
       en: "Hi! I'm your Excel AI Copilot. I can build reports, dashboards, tables, charts and more — and answer questions about your data."
     },
     welcomeHint: {
-      es: 'Ingresa tu API key de Gemini en Configuración para empezar.',
-      en: 'Enter your Gemini API key in Settings to get started.'
+      es: 'Listo para usar. Opcional: ingresa tu propia API key en Configuración.',
+      en: 'Ready to use. Optional: enter your own API key in Settings.'
     },
     placeholder: {
       es: 'Pregúntame sobre tus datos o pídeme crear algo... (ej: crea un panel de control)',

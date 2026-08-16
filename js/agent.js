@@ -37,6 +37,7 @@ const Agent = {
     } = opts;
 
     Journal.beginRequest();
+    Config.resetRotation(); // start each user request at key pool index 0
 
     const systemPrompt = Prompt.build();
     const tools = Tools.declarations();
