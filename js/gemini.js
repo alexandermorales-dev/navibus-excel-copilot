@@ -223,11 +223,24 @@ const Gemini = {
               fullThinking += part.text;
               if (onThinking) onThinking(part.text, fullThinking);
             } else if (part.functionCall) {
-              // functionCall: { name, args }
-              functionCalls.push({
+              // functionCall: { name, args, thought_signature? }
+              // Preserve thought_signature — Gemini requires it to be
+              // echoed back in the conversation history when thinking is
+              // enabled, or subsequent requests return HTTP 400.
+              const fc = {
                 name: part.functionCall.name,
                 args: part.functionCall.args || {}
-              });
+              };
+              if (part.functionCall.thought_signature) {
+                fc.thought_signature = part.functionCall.thought_signature;
+              }
+              if (part.thought_signature) {
+                fc.thought_signature = part.thought_signature;
+              }
+              if (part.thought) {
+                fc.thought = true;
+              }
+              functionCalls.push(fc);
             } else if (part.text) {
               fullText += part.text;
               if (onText) onText(part.text, fullText);
