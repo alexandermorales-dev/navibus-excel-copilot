@@ -619,3 +619,195 @@ body {
   color: var(--text-secondary);
   font-style: italic;
 }
+
+/* ============================================
+   Agentic UI: activity feed, tool rows, stop/undo, markdown
+   ============================================ */
+
+/* Collapsed thinking (click header to toggle after run) */
+.thinking-block.thinking-done .thinking-text.collapsed {
+  max-height: 0;
+  overflow: hidden;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.thinking-block.thinking-done .thinking-header {
+  user-select: none;
+}
+
+/* Activity feed (one or more tool rows per agent round) */
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.tool-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+  animation: fadeIn 0.15s ease;
+  flex-wrap: wrap;
+}
+
+.tool-row-error {
+  border-color: rgba(244, 67, 54, 0.4);
+  background: rgba(244, 67, 54, 0.08);
+}
+
+.tool-spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.tool-ok, .tool-fail {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 50%;
+}
+
+.tool-ok { color: var(--success); }
+.tool-fail { color: var(--error); }
+
+.tool-label {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.tool-detail {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.tool-error {
+  flex-basis: 100%;
+  color: var(--error);
+  font-size: 10px;
+  margin-top: 2px;
+  word-break: break-word;
+}
+
+/* Live answer (streamed final text inside the activity container) */
+.live-answer {
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.live-answer-done {
+  border-color: rgba(0, 168, 204, 0.3);
+}
+
+/* Final answer (standalone message after the run) */
+.final-answer {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.final-answer p {
+  margin-bottom: 6px;
+}
+.final-answer p:last-child {
+  margin-bottom: 0;
+}
+.final-answer ul,
+.final-answer ol {
+  margin: 4px 0 6px 18px;
+}
+.final-answer li {
+  margin-bottom: 2px;
+}
+.final-answer code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-tertiary);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.final-answer strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Stop button (in input area) */
+.btn-stop {
+  flex-shrink: 0;
+  padding: 0 12px;
+  height: 38px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-stop:hover:not(:disabled) {
+  background: rgba(244, 67, 54, 0.15);
+  border-color: var(--error);
+  color: var(--error);
+}
+
+.btn-stop:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Undo button (on final message) */
+.btn-undo {
+  margin-top: 8px;
+  padding: 5px 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-undo:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border-color: var(--accent);
+}
+
+.btn-undo:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

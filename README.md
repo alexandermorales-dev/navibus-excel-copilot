@@ -1,26 +1,32 @@
 # Excel AI Copilot
 
-An intelligent Excel add-in that uses Google's Gemini API to create reports, dashboards, tables, charts, and pivot tables — without generating or injecting VBA code.
+An intelligent Excel add-in that uses Google's Gemini API to **answer questions about your workbook** and **build reports, dashboards, tables, charts, and pivots** — via an iterative, tool-calling agent that reads the real workbook, acts step-by-step, verifies its own results, and self-corrects.
 
 ## How it works
 
-1. You type a request in the sidebar (e.g., "crea un panel de control con KPIs").
-2. The add-in reads the workbook structure (sheet names, headers, data types).
-3. Gemini returns a **JSON action plan** (validated, not raw code).
-4. A deterministic executor performs each action via Office.js — no compile errors, ever.
-5. If an action fails, it rolls back all changes and attempts one automatic repair round.
-6. On success, the assistant generates a summary in Spanish with suggestions for follow-up analysis.
+The add-in runs an **agentic loop** (no more single-shot "JSON plan"):
+
+1. You type a request in the sidebar (e.g. "crea un panel de control con KPIs" or "¿cuál es el total de ventas por región?").
+2. The agent calls Gemini with a set of **tools** (functions) it can invoke.
+3. Gemini decides what to do: it calls tools like `get_workbook_overview`, `read_range`, `add_sheet`, `write_range`, `create_chart`, etc.
+4. Each tool runs against the real workbook via Office.js and returns verified results (including formula errors like `#REF!`) back to Gemini.
+5. Gemini sees the real results, self-corrects if something failed, and continues until the task is done.
+6. It finishes with a concise summary in your language, plus suggested follow-up analyses.
+7. Every mutation is journaled, so a **Undo** button on the final message reverts the whole request.
 
 ## Features
 
-- **Live reasoning stream**: Watch the model's thinking appear in real-time as it analyzes your data.
-- **Progress bar**: Real-time tracking of each action as it executes.
-- **Executive summary**: On completion, shows what was created and suggests next analyses.
-- **Professional layout**: Automatic column widths, row heights, and element spacing — no overlapping data.
-- **Auto-repair**: If an action fails, rolls back everything and retries with error context.
-- **Dark theme**: Modern dark UI with blue accents.
-- **Quota handling**: Detects rate limits (429) and daily quota exhaustion with clear messages.
-- **Spanish-first**: All UI text, responses, reasoning, and suggestions are in Spanish.
+- **Agentic tool-calling loop** — Gemini reads, writes, and verifies step-by-step instead of guessing a plan up front.
+- **Live reasoning stream** — watch the model's thinking appear in real time.
+- **Live tool activity feed** — each tool call shows as a row with a spinner → ✓/✗ and a short description.
+- **Self-correction** — when a tool returns an error, the model sees it and retries with a fix (no more full rollbacks).
+- **Stop button** — abort a run mid-flight.
+- **Undo last request** — reverts all mutations from the most recent request (per-request journal).
+- **Edit existing sheets** — the agent can add formula columns, sort, clean, and format your data when asked (with undo).
+- **Q&A about your data** — the agent reads exact cells with `read_range` to answer accurately, no more guessing from samples.
+- **Markdown rendering** — final answers support bold, lists, and inline code.
+- **Dark theme, ES/EN auto-detect** — UI and model output follow Office's display language.
+- **Quota handling** — 429 rate limits show a visible countdown; daily quota fails fast with a clear message.
 
 ## Requirements
 
@@ -74,56 +80,64 @@ No installer, no Node.js, no build step on their end.
 ├── manifest-localhost.xml    # For local development
 ├── index.html                # Task pane entry point
 ├── css/
-│   └── style.css             # Dark-themed UI
+│   └── style.css             # Dark-themed UI + activity feed + markdown
 ├── js/
 │   ├── config.js             # Settings (API key, model) in localStorage
-│   ├── gemini.js             # Gemini API client (streaming, 429, fallback)
-│   ├── schema.js             # Workbook snapshot via Office.js
-│   ├── actions.js            # Action DSL validation
-│   ├── executor.js           # Deterministic Office.js executor + rollback + auto-fit
-│   ├── repair.js             # Failed-action repair round-trip
-│   └── app.js                # UI controller + agent loop + system prompt
+│   ├── i18n.js               # ES/EN string table + Office locale detection
+│   ├── gemini.js             # Gemini API client (function calling, streaming, 429, fallback)
+│   ├── schema.js             # Workbook snapshot via Office.js (powers get_workbook_overview / read_range)
+│   ├── journal.js            # Per-request mutation journal → Undo
+│   ├── tools.js              # Tool declarations + Office.js implementations (read/write/edit)
+│   ├── prompt.js             # Agentic system prompts (ES/EN)
+│   ├── agent.js              # Iterative agent loop (call → tool → result → repeat)
+│   └── app.js                # UI controller: chat, activity feed, Stop, Undo
 ├── assets/
 │   └── icon-*.png            # Add-in icons
 ├── dev_server.py             # HTTPS development server
 └── README.md
 ```
 
-## Action DSL
+## Tools available to the agent
 
-The add-in uses a JSON action plan instead of generated code. Available operations:
-
-| Op | Description |
+| Tool | Description |
 |---|---|
-| `addSheet` | Create a new worksheet |
-| `writeRange` | Write values to a range |
-| `formatRange` | Apply formatting (bold, fill, borders, column width, etc.) |
-| `kpiBlock` | Create a labeled KPI cell with a formula or static value |
-| `createTable` | Create an Excel Table from a range |
-| `createPivot` | Create a PivotTable |
-| `createChart` | Create a chart from a range or pivot |
-| `addSlicer` | Add a slicer to a pivot or table |
-| `conditionalFormat` | Add conditional formatting (data bars, color scale, etc.) |
-| `deleteSheet` | Delete a worksheet |
+| `get_workbook_overview` | Sheets, used ranges, headers, column types, numeric stats (sum/avg/min/max/count) |
+| `read_range` | Read values / formulas / formats of any range |
+| `find_in_workbook` | Locate a value or label across a sheet or the whole workbook |
+| `get_objects` | List existing tables, pivots, charts, slicers, named ranges |
+| `write_range` | Write a 2D array (formulas auto-detected); returns a sample to catch errors |
+| `format_range` | Bold, fill, borders, column width, row height, merge, number format, alignment |
+| `clear_range` | Clear values and formatting from a range |
+| `add_sheet` / `delete_sheet` | Create / delete worksheets (delete guarded) |
+| `create_table` | Create an Excel Table from a range |
+| `create_pivot` | Create a PivotTable |
+| `create_chart` | Create a chart from a range or pivot |
+| `add_slicer` | Add a slicer to a pivot or table |
+| `conditional_format` | Color scale, data bar, or cell-value rules |
+| `autofit` | Auto-fit column widths / row heights |
+| `insert_rows_cols` / `delete_rows_cols` | Structural edits (undo is partial) |
+| `sort_range` | Sort a range by a key column |
 
-Each action is validated before execution. If validation or execution fails, the add-in rolls back any changes made and sends the errors back to Gemini for one repair attempt.
+Each mutating tool records a pre-image with the Journal so the user can undo the whole request.
 
 ## Gemini API notes
 
 - Default model: `gemini-3.6-flash` (free tier).
 - Fallback model: `gemini-3.5-flash-lite` (separate quota).
+- Uses native **function calling** (`tools` + `toolConfig`).
 - Handles 429 rate limits by parsing Google's `retryDelay` and waiting with a visible countdown.
 - Per-day quota exhaustion fails fast with a clear message.
 - API key is stored in `localStorage` and only sent to Google's API.
 - Model reasoning is streamed live via `streamGenerateContent` with `includeThoughts: true`.
+- The agent loop makes multiple Gemini calls per request (5–15+); this is expected and necessary for self-correction.
 
 ## Limitations
 
 - Requires Excel 2021+ (Office.js pivot/slicer APIs).
-- Office.js bypasses Excel's undo stack (mitigated by artifact-log rollback).
-- The DSL supports a defined set of operations — new ops can be added by extending `actions.js` and `executor.js`.
+- Office.js bypasses Excel's undo stack — mitigated by the per-request Journal and the **Undo** button.
+- Free-tier rate limits may be hit faster than before because the agent makes multiple calls per request.
 - Calculated pivot fields and classic pivot layout are not supported by the Office.js API.
-- The model's internal reasoning language may occasionally be in English despite Spanish instructions (model limitation).
+- Structural edits (insert/delete rows/cols) and deletions of existing data sheets are only partially undoable — the agent will confirm with you before destructive operations.
 
 ## Troubleshooting
 
@@ -136,3 +150,5 @@ Each action is validated before execution. If validation or execution fails, the
 **Pivot/slicer errors** — Confirm you're running Excel 2021+ or Microsoft 365. Older versions don't support the required Office.js APIs.
 
 **Rate limited (429)** — The free tier has per-minute and per-day limits. Wait a minute for per-minute limits. For per-day limits, try again after midnight Pacific time.
+
+**Agent hit the round limit** — The agent caps at 20 tool-call rounds per request. If it stops mid-task, send a follow-up message like "continue" or "verify what you built so far".

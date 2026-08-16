@@ -1,21 +1,24 @@
 /* ============================================
-   app.js — Main UI controller + agent loop
+   app.js — UI controller for the agentic Excel Copilot
+   Owns: chat DOM, settings, conversation history, and the
+   Agent.run() lifecycle (start/stop/undo).
+   No more plan/repair/summary logic — the agent handles all of that.
    ============================================ */
 
 const App = {
-  conversation: [],   // { role, parts: [{text}] } — Gemini format
+  conversation: [],   // Gemini contents format
   isRunning: false,
-  lastUserText: '',   // last user message, for manual retry
+  lastUserText: '',   // for manual retry
+  abortController: null, // for Stop button
 
-  // DOM refs
   el: {},
 
   init() {
-    // Cache DOM elements
     this.el = {
       messageList: document.getElementById('messageList'),
       messageInput: document.getElementById('messageInput'),
       sendBtn: document.getElementById('sendBtn'),
+      stopBtn: document.getElementById('stopBtn'),
       settingsBtn: document.getElementById('settingsBtn'),
       settingsPanel: document.getElementById('settingsPanel'),
       apiKeyInput: document.getElementById('apiKeyInput'),
@@ -24,14 +27,14 @@ const App = {
       statusBar: document.getElementById('statusBar')
     };
 
-    // Load saved settings
     Config.load();
     this.el.apiKeyInput.value = Config.apiKey;
     this.el.modelSelect.value = Config.model;
     this.updateSendButton();
+    this.updateStopButton();
 
-    // Event listeners
     this.el.sendBtn.addEventListener('click', () => this.sendMessage());
+    this.el.stopBtn.addEventListener('click', () => this.stopRun());
     this.el.messageInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -55,39 +58,29 @@ const App = {
       Config.save();
     });
 
-    this.el.clearChatBtn.addEventListener('click', () => {
-      this.clearChat();
-    });
+    this.el.clearChatBtn.addEventListener('click', () => this.clearChat());
 
-    // Initialize Office.js
     if (typeof Office !== 'undefined') {
       Office.onReady((info) => {
         if (info.host === Office.HostType.Excel) {
           console.log('Excel AI Copilot ready');
         }
-        // Detect language from Office context
         I18n.init();
         this.localizeUI();
       });
     } else {
-      // Running outside Office (browser dev mode)
       console.warn('Office.js not loaded — running in browser dev mode');
       I18n.init();
       this.localizeUI();
     }
   },
 
-  // Localize all data-i18n elements in the HTML
   localizeUI() {
-    // Localize text content
     document.querySelectorAll('[data-i18n]').forEach(el => {
-      const key = el.getAttribute('data-i18n');
-      el.textContent = I18n.t(key);
+      el.textContent = I18n.t(el.getAttribute('data-i18n'));
     });
-    // Localize placeholders
     document.querySelectorAll('[data-i18n-ph]').forEach(el => {
-      const key = el.getAttribute('data-i18n-ph');
-      el.placeholder = I18n.t(key);
+      el.placeholder = I18n.t(el.getAttribute('data-i18n-ph'));
     });
   },
 
@@ -95,6 +88,10 @@ const App = {
     const hasText = this.el.messageInput.value.trim().length > 0;
     const hasKey = Config.hasApiKey();
     this.el.sendBtn.disabled = !hasText || !hasKey || this.isRunning;
+  },
+
+  updateStopButton() {
+    this.el.stopBtn.disabled = !this.isRunning;
   },
 
   async sendMessage() {
@@ -109,389 +106,281 @@ const App = {
 
     this.isRunning = true;
     this.updateSendButton();
+    this.updateStopButton();
     this.el.messageInput.value = '';
     this.lastUserText = text;
 
-    // Show user message
     this.addMessage('user', text);
+    this.conversation.push({ role: 'user', parts: [{ text }] });
 
-    // Add to conversation history
-    this.conversation.push({
-      role: 'user',
-      parts: [{ text: text }]
-    });
+    this.abortController = new AbortController();
 
-    // Show typing indicator
-    const typingEl = this.addTypingIndicator();
+    // Create the live activity container for this run.
+    const activityEl = this.addActivityContainer();
 
     try {
-      await this.runAgentLoop(text, typingEl);
-    } catch (e) {
-      this.removeElement(typingEl);
-      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
-    }
-
-    this.isRunning = false;
-    this.updateSendButton();
-  },
-
-  /**
-   * Re-run the agent loop for the last user message, without re-adding it
-   * to the conversation (it's already there from the original attempt).
-   */
-  async retryLastMessage() {
-    if (this.isRunning || !this.lastUserText) return;
-
-    this.isRunning = true;
-    this.updateSendButton();
-
-    const typingEl = this.addTypingIndicator();
-    this.updateTypingText(typingEl, I18n.t('retryingMessage'));
-
-    try {
-      await this.runAgentLoop(this.lastUserText, typingEl);
-    } catch (e) {
-      this.removeElement(typingEl);
-      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
-    }
-
-    this.isRunning = false;
-    this.updateSendButton();
-  },
-
-  async runAgentLoop(userText, typingEl) {
-    // 1. Read workbook schema (tag copilot-created sheets from prior runs)
-    this.updateTypingText(typingEl, I18n.t('analyzing'));
-    let schemaSnap;
-    try {
-      const copilotSheets = [...(Executor.createdSheetNames || [])];
-      schemaSnap = await Schema.snapshot(copilotSheets);
-    } catch (e) {
-      this.removeElement(typingEl);
-      this.addErrorMessageWithRetry(`${I18n.t('workbookError')}: ${e.message}`);
-      return;
-    }
-
-    // 2. Build system prompt
-    const systemPrompt = Prompt.build(schemaSnap);
-
-    // 3. Call Gemini with live thinking display
-    this.updateTypingText(typingEl, I18n.t('thinking'));
-
-    // Replace typing indicator with a live thinking block
-    this.removeElement(typingEl);
-    const thinkingEl = this.addLiveThinkingMessage();
-
-    const result = await Gemini.generateWithFallback(
-      systemPrompt,
-      this.conversation,
-      (chunk, fullThinking) => {
-        // Live update: append chunk to thinking display
-        this.updateLiveThinking(thinkingEl, fullThinking);
-      }
-    );
-
-    // Finalize the thinking block
-    this.finalizeLiveThinking(thinkingEl);
-
-    if (!result.ok) {
-      this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
-      return;
-    }
-
-    // 4. Parse the response
-    const parsed = Repair.parsePlan(result.text);
-    if (!parsed.ok) {
-      // Not a JSON plan — treat as a text response
-      this.addMessage('assistant', result.text);
-      this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
-      return;
-    }
-
-    // 5. Validate the plan
-    const validation = Actions.validatePlan(parsed.plan);
-    if (!validation.valid) {
-      this.addMessage('system', `${I18n.t('validationFailed')}:\n${validation.errors.join('\n')}`);
-      // Push the failed plan to conversation for context consistency
-      this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
-      const failedAsActions = validation.errors.map((err, i) => ({ index: i, op: 'validation', error: err }));
-      await this.attemptRepair(systemPrompt, failedAsActions, schemaSnap, parsed.plan, [], 'full');
-      return;
-    }
-
-    // 6. Execute the plan with live progress
-    this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
-    const progressEl = this.addProgressMessage(parsed.plan);
-
-    const execResult = await Executor.execute(parsed.plan, (current, total, action) => {
-      this.updateProgress(progressEl, current, total, action);
-    });
-
-    this.finalizeProgress(progressEl);
-
-    // 7. Show results
-    this.showRunSummary(execResult);
-
-    if (execResult.failed.length > 0) {
-      this.addMessage('system', I18n.t('execFailed'));
-      // On full rollback, add corrective note to conversation so the model
-      // doesn't think the dashboard still exists on the next turn.
-      if (execResult.rolledBack === 'full') {
-        this.conversation.push({
-          role: 'user',
-          parts: [{ text: I18n.t('rollbackNote') }]
-        });
-      }
-      await this.attemptRepair(systemPrompt, execResult.failed, schemaSnap, parsed.plan, execResult.succeeded, execResult.rolledBack);
-    } else {
-      // 8. Generate a final summary + suggestions message
-      await this.generateSummaryAndSuggestions(parsed.plan, execResult, schemaSnap, systemPrompt);
-    }
-  },
-
-  async generateSummaryAndSuggestions(plan, execResult, schemaSnap, systemPrompt) {
-    // Build a description of what was ACTUALLY executed (not the original plan)
-    const executedActions = execResult.succeeded.map(s => {
-      const opLabels = I18n.strings.opLabel;
-      const a = s.action;
-      switch (a.op) {
-        case 'addSheet': return `${opLabels.addSheet[I18n.lang]} "${a.name}"`;
-        case 'kpiBlock': return `KPI "${a.label}"`;
-        case 'createChart': return `${opLabels.createChart[I18n.lang]} "${a.title || a.type}"`;
-        case 'createPivot': return `${opLabels.createPivot[I18n.lang]} "${a.name}"`;
-        case 'createTable': return `${opLabels.createTable[I18n.lang]} "${a.name}"`;
-        case 'addSlicer': return `${opLabels.addSlicer[I18n.lang]} "${a.field}"`;
-        case 'conditionalFormat': return `${opLabels.conditionalFormat[I18n.lang]} ${a.range}`;
-        case 'writeRange': return `${I18n.lang === 'es' ? 'Datos' : 'Data'} ${a.range}`;
-        case 'formatRange': return `${I18n.lang === 'es' ? 'Formato' : 'Format'} ${a.range}`;
-        default: return a.op;
-      }
-    }).join(', ');
-
-    const summaryPrompt = I18n.tf('summaryPrompt', executedActions, Schema.toText(schemaSnap));
-
-    // Use the real system prompt (with fidelity rules) as system instruction,
-    // and the summary request as a user message — not duplicated.
-    const result = await Gemini.generateWithFallback(
-      systemPrompt,
-      [{ role: 'user', parts: [{ text: summaryPrompt }] }],
-      null  // no thinking callback for this short call
-    );
-
-    if (result.ok && result.text) {
-      this.addMessage('assistant', result.text);
-      this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
-    }
-  },
-
-  async attemptRepair(systemPrompt, failedActions, schemaSnap, originalPlan, succeeded = [], rollbackType = 'full', maxAttempts = 2) {
-    let currentFailed = failedActions;
-    let currentPlan = originalPlan;
-    let currentSucceeded = succeeded;
-    let currentRollback = rollbackType;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (maxAttempts > 1) {
-        this.addMessage('system', I18n.tf('repairAttempt', attempt, maxAttempts));
-      }
-
-      // Re-snapshot the workbook before each repair attempt so the repair
-      // prompt has accurate ground truth (sheets may have been created/kept).
-      let freshSnap;
-      try {
-        const copilotSheets = [...(Executor.createdSheetNames || [])];
-        freshSnap = await Schema.snapshot(copilotSheets);
-      } catch (e) {
- // If snapshot fails, fall back to the stale one — better than nothing.
-        freshSnap = schemaSnap;
-      }
-
-      const repairResult = await Repair.repairActions(
-        systemPrompt,
-        this.conversation,
-        currentFailed,
-        freshSnap,
-        currentPlan,
-        currentRollback,
-        currentSucceeded
-      );
-
-      if (!repairResult.ok) {
-        this.addErrorMessageWithRetry(`${I18n.t('repairFailed')}: ${repairResult.error}`);
-        return;
-      }
-
-      // Push the repair exchange into conversation history for future context.
-      this.conversation.push({
-        role: 'model',
-        parts: [{ text: JSON.stringify(repairResult.plan) }]
+      const result = await Agent.run({
+        userText: text,
+        conversation: this.conversation,
+        signal: this.abortController.signal,
+        onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
+        onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
+        onToolStart: (callId, name, args) => this.addToolRow(activityEl, callId, name, args),
+        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult)
       });
 
-      // Execute repaired plan
-      const execResult = await Executor.execute(repairResult.plan);
-      this.showRunSummary(execResult);
+      this.finalizeLiveThinking(activityEl);
+      this.finalizeLiveAnswer(activityEl);
 
-      if (execResult.failed.length === 0) {
-        return; // repaired successfully
+      if (!result.ok) {
+        this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
+      } else {
+        // Render the final answer as a proper message (with undo if sealed).
+        this.addFinalMessage(result.finalText, result.sealed, result.aborted);
       }
-
-      // On full rollback, add corrective note so model knows state was reverted.
-      if (execResult.rolledBack === 'full') {
-        this.conversation.push({
-          role: 'user',
-          parts: [{ text: I18n.t('rollbackNote') }]
-        });
-      }
-
-      // Prepare for another repair round, if any attempts remain
-      currentFailed = execResult.failed;
-      currentPlan = repairResult.plan;
-      currentSucceeded = execResult.succeeded;
-      currentRollback = execResult.rolledBack;
+    } catch (e) {
+      this.finalizeLiveThinking(activityEl);
+      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
-    this.addErrorMessageWithRetry(I18n.t('repairAlsoFailed'));
+    this.abortController = null;
+    this.isRunning = false;
+    this.updateSendButton();
+    this.updateStopButton();
   },
 
-  showRunSummary(result) {
-    // Build a user-friendly summary
-    const summary = this.buildFriendlySummary(result);
+  stopRun() {
+    if (this.abortController) this.abortController.abort();
+  },
 
-    const card = document.createElement('div');
-    card.className = 'message assistant';
-    card.innerHTML = `
+  async retryLastMessage() {
+    if (this.isRunning || !this.lastUserText) return;
+    this.isRunning = true;
+    this.updateSendButton();
+    this.updateStopButton();
+    this.abortController = new AbortController();
+
+    const activityEl = this.addActivityContainer();
+    this.updateLiveThinking(activityEl, I18n.t('retryingMessage'));
+
+    try {
+      const result = await Agent.run({
+        userText: this.lastUserText,
+        conversation: this.conversation,
+        signal: this.abortController.signal,
+        onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
+        onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
+        onToolStart: (callId, name, args) => this.addToolRow(activityEl, callId, name, args),
+        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult)
+      });
+      this.finalizeLiveThinking(activityEl);
+      this.finalizeLiveAnswer(activityEl);
+      if (!result.ok) {
+        this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
+      } else {
+        this.addFinalMessage(result.finalText, result.sealed, result.aborted);
+      }
+    } catch (e) {
+      this.finalizeLiveThinking(activityEl);
+      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
+    }
+
+    this.abortController = null;
+    this.isRunning = false;
+    this.updateSendButton();
+    this.updateStopButton();
+  },
+
+  /* ----------------------------------------------------------
+     ACTIVITY FEED UI
+     ---------------------------------------------------------- */
+  addActivityContainer() {
+    const msg = document.createElement('div');
+    msg.className = 'message assistant';
+    msg.innerHTML = `
       <div class="message-avatar">AI</div>
       <div class="message-content">
-        <div class="run-card">
-          <div class="run-card-title">
-            ${summary.title}
-            <span class="badge ${summary.badgeClass}">${summary.badgeText}</span>
+        <div class="thinking-block thinking-live">
+          <div class="thinking-header">
+            <span class="thinking-icon">\u{1F4AD}</span>
+            <span class="thinking-label">${this.escapeHtml(I18n.t('reasoning'))}</span>
+            <span class="thinking-dots"><span></span><span></span><span></span></span>
           </div>
-          <div class="run-card-body">${summary.body}</div>
-          ${summary.errors.length > 0 ? `
-            <div class="run-card-errors">
-              <strong>Errores:</strong>
-              <ul class="run-card-list">
-                ${summary.errors.map(e => `<li><span class="icon-fail">âœ—</span> ${e}</li>`).join('')}
-              </ul>
-            </div>
-          ` : ''}
+          <div class="thinking-text thinking-stream"></div>
         </div>
+        <div class="activity-feed"></div>
+        <div class="live-answer hidden"></div>
       </div>
-    `;
-    this.el.messageList.appendChild(card);
-    this.scrollToBottom();
-  },
-
-  buildFriendlySummary(result) {
-    const succeeded = result.succeeded;
-    const failed = result.failed;
-
-    const created = {
-      sheets: [],
-      kpis: 0,
-      tables: [],
-      pivots: [],
-      charts: [],
-      slicers: [],
-      ranges: 0,
-      formats: 0,
-      conditionalFormats: 0,
-    };
-
-    for (const s of succeeded) {
-      const a = s.action;
-      switch (a.op) {
-        case 'addSheet': created.sheets.push(a.name); break;
-        case 'kpiBlock': created.kpis++; break;
-        case 'createTable': created.tables.push(a.name); break;
-        case 'createPivot': created.pivots.push(a.name); break;
-        case 'createChart': created.charts.push(a.title || a.type || 'chart'); break;
-        case 'addSlicer': created.slicers.push(a.field || 'slicer'); break;
-        case 'writeRange': created.ranges++; break;
-        case 'formatRange': created.formats++; break;
-        case 'conditionalFormat': created.conditionalFormats++; break;
-      }
-    }
-
-    const parts = [];
-    if (created.sheets.length > 0) {
-      parts.push(`${I18n.t('newSheet')}: <strong>${created.sheets.join(', ')}</strong>`);
-    }
-    if (created.kpis > 0) {
-      parts.push(I18n.tf('kpis', created.kpis));
-    }
-    if (created.tables.length > 0) {
-      parts.push(`${I18n.tf('tables', created.tables.length)}: ${created.tables.join(', ')}`);
-    }
-    if (created.pivots.length > 0) {
-      parts.push(`${I18n.tf('pivots', created.pivots.length)}: ${created.pivots.join(', ')}`);
-    }
-    if (created.charts.length > 0) {
-      parts.push(`${I18n.tf('charts', created.charts.length)}: ${created.charts.join(', ')}`);
-    }
-    if (created.slicers.length > 0) {
-      parts.push(`${I18n.tf('slicers', created.slicers.length)}: ${created.slicers.join(', ')}`);
-    }
-    if (created.conditionalFormats > 0) {
-      parts.push(I18n.tf('conditionalFormats', created.conditionalFormats));
-    }
-    if (created.ranges > 0 && created.formats > 0) {
-      parts.push(I18n.tf('dataBlocks', created.ranges, created.formats));
-    }
-
-    const body = parts.length > 0
-      ? `<p>${parts.join(' \u00b7 ')}</p>`
-      : `<p>${I18n.t('actionCompleted')}</p>`;
-
-    let title, badgeText, badgeClass;
-    if (failed.length === 0) {
-      title = I18n.t('summaryTitle');
-      badgeText = I18n.t('summarySuccess');
-      badgeClass = 'success';
-    } else if (result.rolledBack === 'full') {
-      title = I18n.t('summaryRolledBackTitle');
-      badgeText = I18n.t('summaryRolledBack');
-      badgeClass = 'error';
-    } else {
-      // 'partial' — some actions succeeded and were kept, only some failed
-      title = I18n.t('summaryPartialTitle');
-      badgeText = I18n.t('summaryPartial');
-      badgeClass = 'partial';
-    }
-
-    const errors = failed.map(f => `${this.opLabel(f.action?.op)}: ${f.error}`);
-
-    return { title, badgeText, badgeClass, body, errors };
-  },
-
-  opLabel(op) {
-    const labels = I18n.strings.opLabel;
-    return (labels[op] && (labels[op][I18n.lang] || labels[op].en)) || op || 'Operation';
-  },
-
-  // --- UI helpers ---
-
-  addMessage(role, text) {
-    const msg = document.createElement('div');
-    msg.className = `message ${role}`;
-
-    const avatar = role === 'user' ? 'You' : role === 'system' ? '!' : 'AI';
-    const content = this.escapeHtml(text);
-
-    msg.innerHTML = `
-      <div class="message-avatar">${avatar}</div>
-      <div class="message-content">${this.formatContent(content)}</div>
     `;
     this.el.messageList.appendChild(msg);
     this.scrollToBottom();
     return msg;
   },
 
-  /**
-   * Render a terminal error message with an inline "Retry" button that
-   * re-runs the last user message through the agent loop.
-   */
+  updateLiveThinking(activityEl, fullText) {
+    if (!activityEl || !fullText) return;
+    const streamEl = activityEl.querySelector('.thinking-stream');
+    if (streamEl) streamEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
+    this.scrollToBottom();
+  },
+
+  finalizeLiveThinking(activityEl) {
+    if (!activityEl) return;
+    const header = activityEl.querySelector('.thinking-header');
+    if (header) {
+      header.innerHTML = `<span class="thinking-icon">\u{1F4AD}</span><span class="thinking-label">${this.escapeHtml(I18n.t('reasoningDone'))}</span>`;
+    }
+    const block = activityEl.querySelector('.thinking-block');
+    if (block) {
+      block.classList.remove('thinking-live');
+      block.classList.add('thinking-done');
+    }
+    // Collapse long thinking by default; user can expand.
+    const streamEl = activityEl.querySelector('.thinking-stream');
+    if (streamEl && streamEl.textContent.trim().length > 0) {
+      streamEl.classList.add('collapsed');
+      header.style.cursor = 'pointer';
+      header.onclick = () => streamEl.classList.toggle('collapsed');
+    }
+  },
+
+  updateLiveAnswer(activityEl, fullText) {
+    if (!activityEl || !fullText) return;
+    const ansEl = activityEl.querySelector('.live-answer');
+    if (ansEl) {
+      ansEl.classList.remove('hidden');
+      ansEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
+    }
+    this.scrollToBottom();
+  },
+
+  finalizeLiveAnswer(activityEl) {
+    if (!activityEl) return;
+    const ansEl = activityEl.querySelector('.live-answer');
+    if (ansEl && ansEl.classList.contains('hidden')) {
+      // No live answer was streamed (e.g. agent ended via tool round with no text).
+      // The final message will be added separately; hide this placeholder.
+      ansEl.remove();
+    } else if (ansEl) {
+      // Promote the live answer to a finalized styled block.
+      ansEl.classList.add('live-answer-done');
+    }
+  },
+
+  addToolRow(activityEl, callId, name, args) {
+    const feed = activityEl.querySelector('.activity-feed');
+    if (!feed) return;
+    const row = document.createElement('div');
+    row.className = 'tool-row';
+    row.dataset.callId = callId;
+    row.innerHTML = `
+      <span class="tool-spinner"></span>
+      <span class="tool-label">${this.escapeHtml(I18n.toolLabel(name))}</span>
+      <span class="tool-detail">${this.escapeHtml(this.toolDetail(name, args))}</span>
+    `;
+    feed.appendChild(row);
+    this.scrollToBottom();
+  },
+
+  finalizeToolRow(activityEl, callId, toolResult) {
+    const row = activityEl.querySelector(`.tool-row[data-call-id="${callId}"]`);
+    if (!row) return;
+    const spinner = row.querySelector('.tool-spinner');
+    if (spinner) {
+      spinner.classList.remove('tool-spinner');
+      spinner.classList.add(toolResult.ok ? 'tool-ok' : 'tool-fail');
+      spinner.textContent = toolResult.ok ? '\u2713' : '\u2717';
+    }
+    if (!toolResult.ok) {
+      row.classList.add('tool-row-error');
+      const errSpan = document.createElement('span');
+      errSpan.className = 'tool-error';
+      errSpan.textContent = toolResult.error;
+      row.appendChild(errSpan);
+    }
+    this.scrollToBottom();
+  },
+
+  toolDetail(name, args) {
+    // Short human-readable summary of a tool call's arguments.
+    const a = args || {};
+    switch (name) {
+      case 'get_workbook_overview': return '';
+      case 'read_range': return `${a.sheet || ''}!${a.range || ''}${a.what && a.what !== 'values' ? ' (' + a.what + ')' : ''}`;
+      case 'find_in_workbook': return `"${a.query || ''}"${a.sheet ? ' en ' + a.sheet : ''}`;
+      case 'get_objects': return a.sheet ? a.sheet : '';
+      case 'write_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'format_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'clear_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'add_sheet': return a.name || '';
+      case 'delete_sheet': return a.name || '';
+      case 'create_table': return a.name || '';
+      case 'create_pivot': return a.name || '';
+      case 'create_chart': return a.title || a.type || '';
+      case 'add_slicer': return a.field || '';
+      case 'conditional_format': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'autofit': return a.sheet || '';
+      case 'insert_rows_cols': return `${a.sheet || ''} ${a.kind || ''} @${a.at || ''}`;
+      case 'delete_rows_cols': return `${a.sheet || ''} ${a.kind || ''} @${a.at || ''}`;
+      case 'sort_range': return `${a.sheet || ''}!${a.range || ''}`;
+      default: return '';
+    }
+  },
+
+  /* ----------------------------------------------------------
+     FINAL MESSAGE
+     ---------------------------------------------------------- */
+  addFinalMessage(text, sealed, aborted) {
+    const msg = document.createElement('div');
+    msg.className = 'message assistant';
+    const undoBtn = (sealed && !aborted)
+      ? `<button type="button" class="btn-undo" data-undo>${this.escapeHtml(I18n.t('undo'))}</button>`
+      : '';
+    msg.innerHTML = `
+      <div class="message-avatar">AI</div>
+      <div class="message-content">
+        <div class="final-answer">${this.formatMarkdown(text)}</div>
+        ${undoBtn}
+      </div>
+    `;
+    const btn = msg.querySelector('[data-undo]');
+    if (btn) btn.addEventListener('click', () => this.undoLastRequest(btn));
+    this.el.messageList.appendChild(msg);
+    this.scrollToBottom();
+  },
+
+  async undoLastRequest(btn) {
+    if (btn) { btn.disabled = true; btn.textContent = I18n.t('undoing'); }
+    const res = await Journal.undoLast();
+    if (btn) { btn.disabled = false; btn.textContent = I18n.t('undo'); }
+    if (res.ok) {
+      const note = res.partial
+        ? (I18n.lang === 'es'
+            ? `Revertido (parcial: ${res.skipped.length} cambio(s) no reversibles).`
+            : `Undone (partial: ${res.skipped.length} change(s) not reversible).`)
+        : I18n.t('undone');
+      this.addMessage('system', note);
+    } else {
+      this.addMessage('system', `${I18n.t('undoFailed')}: ${res.error || ''}`);
+    }
+  },
+
+  /* ----------------------------------------------------------
+     BASIC MESSAGES
+     ---------------------------------------------------------- */
+  addMessage(role, text) {
+    const msg = document.createElement('div');
+    msg.className = `message ${role}`;
+    const avatar = role === 'user' ? 'You' : role === 'system' ? '!' : 'AI';
+    msg.innerHTML = `
+      <div class="message-avatar">${avatar}</div>
+      <div class="message-content">${this.formatContent(this.escapeHtml(text))}</div>
+    `;
+    this.el.messageList.appendChild(msg);
+    this.scrollToBottom();
+    return msg;
+  },
+
   addErrorMessageWithRetry(text) {
     const msg = document.createElement('div');
     msg.className = 'message system';
@@ -503,149 +392,15 @@ const App = {
       </div>
     `;
     const btn = msg.querySelector('.btn-retry');
-    if (btn) {
-      btn.addEventListener('click', () => {
-        btn.disabled = true;
-        this.retryLastMessage();
-      });
-    }
+    if (btn) btn.addEventListener('click', () => { btn.disabled = true; this.retryLastMessage(); });
     this.el.messageList.appendChild(msg);
     this.scrollToBottom();
     return msg;
   },
 
-  addTypingIndicator() {
-    const msg = document.createElement('div');
-    msg.className = 'message assistant';
-    msg.innerHTML = `
-      <div class="message-avatar">AI</div>
-      <div class="message-content">
-        <div class="typing-status" id="typingText">Procesando...</div>
-        <div class="typing-indicator">
-          <span></span><span></span><span></span>
-        </div>
-      </div>
-    `;
-    this.el.messageList.appendChild(msg);
-    this.scrollToBottom();
-    return msg;
-  },
-
-  updateTypingText(typingEl, text) {
-    if (!typingEl) return;
-    const statusEl = typingEl.querySelector('.typing-status');
-    if (statusEl) statusEl.textContent = text;
-  },
-
-  addLiveThinkingMessage() {
-    const msg = document.createElement('div');
-    msg.className = 'message assistant';
-    msg.innerHTML = `
-      <div class="message-avatar">AI</div>
-      <div class="message-content">
-        <div class="thinking-block thinking-live">
-          <div class="thinking-header">
-            <span class="thinking-icon">\u{1F4AD}</span>
-            <span class="thinking-label">${I18n.t('reasoning')}</span>
-            <span class="thinking-dots">
-              <span></span><span></span><span></span>
-            </span>
-          </div>
-          <div class="thinking-text thinking-stream"></div>
-        </div>
-      </div>
-    `;
-    this.el.messageList.appendChild(msg);
-    this.scrollToBottom();
-    return msg;
-  },
-
-  updateLiveThinking(thinkingEl, fullText) {
-    if (!thinkingEl) return;
-    const streamEl = thinkingEl.querySelector('.thinking-stream');
-    if (streamEl) {
-      streamEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
-    }
-    this.scrollToBottom();
-  },
-
-  finalizeLiveThinking(thinkingEl) {
-    if (!thinkingEl) return;
-    const header = thinkingEl.querySelector('.thinking-header');
-    if (header) {
-      header.innerHTML = '<span class="thinking-icon">\u{1F4AD}</span><span class="thinking-label">' + I18n.t('reasoningDone') + '</span>';
-    }
-    const block = thinkingEl.querySelector('.thinking-block');
-    if (block) {
-      block.classList.remove('thinking-live');
-      block.classList.add('thinking-done');
-    }
-  },
-
-  addProgressMessage(plan) {
-    const msg = document.createElement('div');
-    msg.className = 'message assistant';
-    msg.innerHTML = `
-      <div class="message-avatar">AI</div>
-      <div class="message-content">
-        <div class="progress-container">
-          <div class="progress-header">
-            <span class="progress-label">Ejecutando plan...</span>
-            <span class="progress-count">0 / ${plan.length}</span>
-          </div>
-          <div class="progress-bar-track">
-            <div class="progress-bar-fill" style="width: 0%"></div>
-          </div>
-          <div class="progress-step"></div>
-        </div>
-      </div>
-    `;
-    this.el.messageList.appendChild(msg);
-    this.scrollToBottom();
-    return msg;
-  },
-
-  updateProgress(progressEl, current, total, action) {
-    if (!progressEl) return;
-    const pct = Math.round((current / total) * 100);
-    const fill = progressEl.querySelector('.progress-bar-fill');
-    const count = progressEl.querySelector('.progress-count');
-    const step = progressEl.querySelector('.progress-step');
-    const label = progressEl.querySelector('.progress-label');
-
-    if (fill) fill.style.width = pct + '%';
-    if (count) count.textContent = `${current} / ${total}`;
-    if (label) label.textContent = I18n.t('building');
-    if (step) {
-      const desc = this.opDescription(action);
-      step.textContent = desc;
-    }
-    this.scrollToBottom();
-  },
-
-  finalizeProgress(progressEl) {
-    if (!progressEl) return;
-    const label = progressEl.querySelector('.progress-label');
-    if (label) label.textContent = I18n.t('completed');
-    const fill = progressEl.querySelector('.progress-bar-fill');
-    if (fill) fill.style.width = '100%';
-  },
-
-  opDescription(action) {
-    const opDesc = I18n.strings.opDesc;
-    if (opDesc[action.op]) {
-      const fn = opDesc[action.op][I18n.lang] || opDesc[action.op].en;
-      return typeof fn === 'function' ? fn(action) : fn;
-    }
-    return `${I18n.lang === 'es' ? 'Ejecutando' : 'Executing'} ${action.op}`;
-  },
-
-  removeElement(el) {
-    if (el && el.parentNode) {
-      el.parentNode.removeChild(el);
-    }
-  },
-
+  /* ----------------------------------------------------------
+     STATUS / MISC
+     ---------------------------------------------------------- */
   showStatus(text) {
     this.el.statusBar.textContent = text;
     this.el.statusBar.classList.remove('hidden');
@@ -657,6 +412,7 @@ const App = {
 
   clearChat() {
     this.conversation = [];
+    Journal.clear();
     this.el.messageList.innerHTML = '';
     this.addMessage('assistant', I18n.t('clearChatDone'));
   },
@@ -667,333 +423,57 @@ const App = {
 
   escapeHtml(text) {
     const div = document.createElement('div');
-    div.textContent = text;
+    div.textContent = text == null ? '' : String(text);
     return div.innerHTML;
   },
 
   formatContent(html) {
-    // Convert newlines to <br>, preserve code blocks
     return html.replace(/\n/g, '<br>');
-  }
-};
+  },
 
-// System prompt builder
-const Prompt = {
-  build(schemaSnap) {
-    const schemaText = Schema.toText(schemaSnap);
-    const lang = I18n.lang;
+  /**
+   * Minimal Markdown rendering for final answers: bold, italic, inline code,
+   * bullet lists, numbered lists, and paragraphs. Keeps output safe (escapes
+   * HTML first) and simple (no full parser).
+   */
+  formatMarkdown(text) {
+    let s = this.escapeHtml(text);
+    // Code spans
+    s = s.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Italic (avoid touching ** which we already handled)
+    s = s.replace(/(^|[^*])\*([^*]+)\*(?!\*)/g, '$1<em>$2</em>');
 
-    if (lang === 'es') {
-      return this.buildSpanish(schemaText);
-    } else {
-      return this.buildEnglish(schemaText);
+    // Split into lines for list/paragraph handling.
+    const lines = s.split('\n');
+    const out = [];
+    let inUl = false, inOl = false;
+    const closeLists = () => {
+      if (inUl) { out.push('</ul>'); inUl = false; }
+      if (inOl) { out.push('</ol>'); inOl = false; }
+    };
+
+    for (let raw of lines) {
+      const line = raw.trim();
+      if (/^[-*]\s+/.test(line)) {
+        if (!inUl) { closeLists(); out.push('<ul>'); inUl = true; }
+        out.push(`<li>${line.replace(/^[-*]\s+/, '')}</li>`);
+      } else if (/^\d+\.\s+/.test(line)) {
+        if (!inOl) { closeLists(); out.push('<ol>'); inOl = true; }
+        out.push(`<li>${line.replace(/^\d+\.\s+/, '')}</li>`);
+      } else if (line === '') {
+        closeLists();
+        out.push('');
+      } else {
+        closeLists();
+        out.push(`<p>${line}</p>`);
+      }
     }
-  },
-
-  buildSpanish(schemaText) {
-    return `Eres un Copiloto AI de Excel integrado como panel lateral. Actúas como un analista financiero/técnico profesional que ayuda a crear informes, paneles de control, tablas, gráficos y tablas dinámicas.
-
-IDIOMA: Español. Eres un asistente de habla hispana. TODO tu output debe estar en español — incluyendo tu razonamiento interno (thinking/reasoning). Piensa en español, razona en español, responde en español. NUNCA uses inglés para nada. Si piensas en inglés, traduce tu razonamiento al español antes de emitirlo.
-
-Terminología profesional en español: "Panel de Control", "Informe Ejecutivo", "Total", "Promedio", "Tendencia", "Variación", "Indicadores Clave", "Tabla Dinámica", "Segmentador de Datos", "Formato Condicional".
-
-ESTADO ACTUAL DEL LIBRO:
-${schemaText}
-
-## REGLAS DE FIDELIDAD DE DATOS (ABSOLUTO — NUNCA VIOLAR)
-
-1. NUNCA inventes, estimes, adivines o asignes valores proporcionales a celdas. Cada valor numérico que escribas en un dashboard o informe DEBE provenir de una de estas dos fuentes:
-   a) Una FÓRMULA que referencia la celda exacta de la hoja de datos (ej: =LC!E15, =LR!C8, =SUM(LC!E5:E14)).
-   b) Un valor que esté explícitamente visible en los datos de muestra del libro que recibiste.
-2. PROHIBIDO dividir un total entre categorías para "repartir" montos. Si no conoces el desglose exacto de una categoría, NO la incluyas con un valor estimado.
-3. PROHIBIDO escribir valores fijos (hardcoded) cuando existe una celda fuente en el libro. SIEMPRE usa fórmulas con referencias directas (ej: =LC!E15) para que el dashboard sea dinámico y exacto.
-4. Si los datos de muestra no incluyen una celda o rango que necesitas para completar la solicitud del usuario, DETENTE y responde en TEXTO PLANO explicando: "No tengo visibilidad de las celdas exactas en la hoja X. ¿Puedes indicarme el rango donde están los valores de [concepto]?" — NUNCA asumas el valor.
-5. Cuando construyas una tabla de desglose, cada fila debe referenciar su celda fuente con una fórmula. Ejemplo correcto: {"op": "writeRange", "sheet": "Dashboard", "range": "B10", "values": [["=LC!E15"]]}.
-6. El sistema ahora soporta fórmulas en writeRange: cualquier string que empiece con "=" se escribirá como fórmula de Excel, no como texto literal. Aprovecha esto para vincular celdas.
-7. Si una hoja tiene más filas de las que ves en la muestra, recuerda que el rango usado (used range) se incluye en la descripción. Usa ese rango para construir referencias como =SUM(LC!E5:E50).
-
-## TU ROL: MAESTRO DE EXCEL, NO SOLO UN CONSTRUCTOR
-
-Eres un maestro de Excel completo: analista de datos, profesor de Excel y asesor proactivo, además de constructor de paneles. Cada turno, decide en cuál de estos 3 MODOS debes responder:
-
-### MODO 1 — ANÁLISIS DEL LIBRO (texto plano)
-Úsalo cuando el usuario pregunte algo SOBRE los datos del libro actual: totales, promedios, tendencias, comparaciones, anomalías, "¿qué contiene la hoja X?", "¿por qué esta fórmula da error?", etc.
-- Usa los "Column stats" del snapshot (son EXACTOS, calculados sobre todas las filas) para responder preguntas de totales/promedios/min/max — NUNCA los calcules a mano desde las sample rows si ya existe la estadística exacta.
-- Si solo tienes sample rows (sin column stats) y la sección dice "truncated", ACLARA que tu respuesta se basa en una muestra parcial y podría no reflejar el 100% de los datos.
-- Si una hoja dice "⚠ COULD NOT READ", INFORMA al usuario que no pudiste leerla — NO la asumas vacía.
-- Si los column stats dicen "PARTIAL", ACLARA que las estadísticas son parciales y pueden no reflejar todos los datos.
-- Si los column stats indican "(N non-numeric cells excluded)", MENCIONA que algunas celdas no numéricas fueron excluidas del cálculo.
-- Señala proactivamente problemas de calidad de datos que notes en el snapshot (encabezados vacíos, tipos mixtos, valores atípicos evidentes).
-- Para explicar una fórmula existente, razona sobre su sintaxis y qué celdas referencia.
-
-### MODO 2 — CONOCIMIENTO GENERAL DE EXCEL (texto plano)
-Úsalo cuando el usuario pregunte algo de Excel que NO depende del libro abierto (ej: "¿cómo funciona XLOOKUP?", "¿cuál es la diferencia entre BUSCARV y BUSCARX?", "¿cómo hago una macro?"). Responde con tu conocimiento general de Excel, con ejemplos de fórmulas cuando ayude.
-
-### MODO 3 — PLAN DE ACCIONES (JSON)
-Úsalo cuando el usuario pida CREAR, GENERAR, MODIFICAR o CONSTRUIR algo en el libro (panel, informe, tabla, gráfico, KPI, formato, etc.). Responde con un ARRAY JSON de acciones (formato abajo). Antes de planes complejos, puedes hacer una pregunta aclaratoria breve en texto plano si falta información crítica.
-
-Reglas para decidir el modo:
-- Si hay AMBIGÜEDAD entre análisis y construcción (ej: "revisa mis ventas"), prefiere responder en texto (Modo 1) con un resumen y ofrece construir un panel como siguiente paso.
-- Nunca mezcles texto y JSON en la misma respuesta.
-- Mantén el contexto de la conversación: si ya construiste algo, un mensaje de seguimiento puede ser una pregunta de análisis (Modo 1) sobre lo creado, no necesariamente una nueva construcción.
-
-### COMO ASESOR PROACTIVO (aplica a los 3 modos)
-- Cuando veas los datos, IDENTIFICA patrones, tendencias y oportunidades de análisis.
-- Sugiere métricas relevantes según el tipo de datos (ej: totales, promedios, tendencias mensuales, comparativas).
-- Si el usuario pide algo genérico como "crea un dashboard", PROPÓN un diseño específico basado en los datos reales que ves.
-- Después de crear algo (Modo 3), SUGIERE 2-3 análisis adicionales o mejoras que podrían ser útiles.
-- Usa un tono profesional pero cercano, como un consultor experto.
-
-## FORMATO DEL PLAN DE ACCIONES
-
-Cuando devuelvas un plan, DEBE ser un array JSON que empieza con [ y termina con ]. Sin markdown, sin texto antes o después del JSON.
-
-Cada acción tiene un campo "op" y parámetros específicos:
-
-[{"op": "addSheet", "name": "Panel_Control"},
- {"op": "writeRange", "sheet": "Panel_Control", "range": "A1:H2", "values": [["Título",""],["Subtítulo",""]]},
- {"op": "formatRange", "sheet": "Panel_Control", "range": "A1:H1", "bold": true, "fontSize": 16, "fillColor": "#1a237e", "fontColor": "#FFFFFF", "horizontalAlignment": "Left"},
- {"op": "kpiBlock", "sheet": "Panel_Control", "cell": "B3", "label": "Total Viajes", "formula": "=COUNTA(Datos!A2:A500)"},
- {"op": "kpiBlock", "sheet": "Panel_Control", "cell": "E3", "label": "Costo Promedio", "formula": "=AVERAGE(Datos!D2:D500)", "numberFormat": "#,##0.00"},
- {"op": "createTable", "sheet": "Datos", "range": "A1:D100", "name": "TablaDatos", "style": "TableStyleMedium2"},
- {"op": "createPivot", "sheet": "Panel_Control", "source": "Datos!A1:M500", "name": "PivotVentas", "dest": "A10", "rows": ["Region"], "values": [{"col": "Importe", "agg": "sum"}]},
- {"op": "createChart", "sheet": "Panel_Control", "type": "columnClustered", "sourceRange": "A10:B20", "dest": "E10", "title": "Ventas por Región", "width": 400, "height": 250},
- {"op": "addSlicer", "sheet": "Panel_Control", "sourcePivot": "PivotVentas", "field": "Mes", "dest": "E2"},
- {"op": "conditionalFormat", "sheet": "Panel_Control", "range": "B3:B10", "type": "dataBar"},
- {"op": "deleteSheet", "name": "HojaVieja"}]
-
-NOTA IMPORTANTE SOBRE RANGOS: Los rangos en los ejemplos anteriores (ej: A2:A500) son ILUSTRATIVOS. SIEMPRE deriva el rango real del used range mostrado en el snapshot. Si el snapshot dice "Sheet 'Datos': 500 rows", usa Datos!C2:C500. Si dice 1000 rows, usa Datos!C2:C1000. NUNCA uses un rango fijo de 500 filas sin verificar el used range real.
-
-## PROPIEDADES DE FORMATO (para formatRange)
-bold (bool), italic (bool), fontSize (number), fontName (string), fillColor (hex como "#1a237e"),
-fontColor (hex), horizontalAlignment ("Left"|"Center"|"Right"), verticalAlignment ("Top"|"Center"|"Bottom"),
-numberFormat (string como "#,##0" o "\u20ac#,##0.00" o "0.0%"), wrapText (bool),
-columnWidth (number — ANCHO DE COLUMNA EN PUNTOS, usar 90-120 para texto corto, 140-200 para texto largo, 70-90 para números),
-rowHeight (number — ALTO DE FILA EN PUNTOS, usar 20-25 para normal, 30-40 para encabezados),
-borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}),
-merge (bool — fusiona las celdas del rango en una sola)
-
-## TIPOS DE GRÁFICO
-"columnClustered", "columnStacked", "barClustered", "barStacked", "line", "pie", "doughnut", "area"
-
-## AGREGACIONES (para tablas dinámicas)
-"sum", "count", "average", "max", "min"
-
-## FORMATO CONDICIONAL (para conditionalFormat)
-Tipos: "colorScale", "dataBar", "cellValue"
-- "colorScale": gradiente de 3 colores (verde-amarillo-rojo), sin parámetros extra.
-- "dataBar": barras de datos azules, sin parámetros extra.
-- "cellValue": requiere "rules" array con objetos {"operator": "GreaterThan", "value": 100, "color": "#FFC7CE"}.
-  Operadores válidos: "GreaterThan", "LessThan", "Between", "EqualTo", "GreaterThanOrEqual", "LessThanOrEqual".
-
-## KPI BLOCKS
-- Usa "formula" para valores calculados (ej: "=SUM(Datos!C2:C500)", "=COUNTA(Datos!A2:A500)").
-- Usa "value" para valores estáticos (ej: 42, "N/A").
-- Opcionalmente incluye "numberFormat" (ej: "#,##0", "\u20ac#,##0.00", "0.0%").
-
-## REGLAS DE LAYOUT PROFESIONAL (CRÍTICO)
-
-1. ESTRUCTURA DEL PANEL (de arriba a abajo):
-   - Fila 1: Título del panel (usar formatRange con "merge": true en A1:H1, fontSize 16, fondo azul oscuro, texto blanco)
-   - Fila 2: Espacio en blanco (rowHeight 10)
-   - Filas 3-5: KPIs en fila horizontal (un KPI cada 3 columnas: B3, E3, H3)
-   - Fila 6-7: Espacio en blanco
-   - Fila 8+: Tabla de datos o tabla dinámica (columnas A-D)
-   - Fila 8+: Gráficos a la derecha (columnas F-H o más allá)
-   - Fila 25+: Sección de observaciones/insights (texto con análisis)
-
-2. ANCHOS DE COLUMNA — SIEMPRE incluir formatRange con columnWidth:
-   - Columna A: 20-25 (etiquetas/nombres)
-   - Columnas B-D: 15-18 (datos numéricos)
-   - Columnas E-H: 15-18 (datos adicionales o espacio para gráficos)
-   - El sistema auto-ajusta las columnas que NO dimensiones explícitamente — solo necesitas columnWidth para columnas que requieren un ancho específico
-
-3. ALTOS DE FILA — SIEMPRE incluir formatRange con rowHeight:
-   - Fila de título: 35-40
-   - Filas de KPI: 25-30
-   - Filas de encabezado de tabla: 25
-   - Filas de datos: 20-22
-   - Filas de espacio: 10-15
-
-4. ESPACIADO — NUNCA superponer elementos:
-   - Dejar al menos 2 filas en blanco entre secciones
-   - Los gráficos necesitan espacio: especificar width (300-450) y height (200-280)
-   - Posicionar gráficos con dest en celdas que tengan espacio libre debajo
-   - KPIs: separar horizontalmente por al menos 2 columnas
-
-5. COLORES PROFESIONALES:
-   - Título: fondo "#1a237e" (azul oscuro), texto "#FFFFFF"
-   - Encabezados de tabla: fondo "#3949ab" (azul medio), texto "#FFFFFF", bold
-   - KPIs: etiqueta en gris "#666666", valor en azul "#1a73e8" o verde "#2e7d32"
-   - Filas alternas: usar fillColor "#f5f5f5" para filas pares (efecto cebra)
-   - Bordes de tabla: "Thin" color "#cccccc"
-
-## REGLAS ESTRICTAS
-1. NUNCA escribas o modifiques hojas de datos existentes. SIEMPRE crea una hoja nueva primero con addSheet.
-2. Pon todos los elementos del panel en UNA hoja nueva.
-3. Usa nombres reales de hojas y columnas del libro. NO inventes nombres de columnas.
-4. Las fórmulas deben referenciar la hoja de datos real, usando el used range del snapshot (ej: si el snapshot dice 500 filas, usa =SUM(Datos!C2:C500); si dice 1000, usa =SUM(Datos!C2:C1000)). NUNCA uses un rango fijo genérico.
-5. Para tablas dinámicas, "source" debe ser un rango completo basado en el used range real, como "Hoja!A1:M{lastRow}" incluyendo encabezados.
-6. Para KPIs, la etiqueta va en la fila encima del valor (el sistema lo maneja automáticamente).
-7. MANTÉN LOS PLANES CONCISOS: prefiere menos acciones bien estructuradas.
-8. Devuelve SOLO el array JSON. Sin markdown, sin explicación fuera del JSON.
-9. NUNCA uses deleteSheet a menos que el usuario pida explícitamente eliminar una hoja por nombre. Eliminar hojas es destructivo e irreversible.
-10. Después de crear algo, la próxima respuesta puede incluir sugerencias de análisis adicionales.`;
-  },
-
-  buildEnglish(schemaText) {
-    return `You are an Excel AI Copilot embedded as a sidebar. You act as a professional financial/technical analyst helping create reports, dashboards, tables, charts, and pivot tables.
-
-LANGUAGE: English. All your output must be in English — including your internal reasoning (thinking/reasoning). Think in English, reason in English, respond in English.
-
-Professional terminology: "Dashboard", "Executive Report", "Total", "Average", "Trend", "Variance", "Key Indicators", "Pivot Table", "Slicer", "Conditional Formatting".
-
-CURRENT WORKBOOK STATE:
-${schemaText}
-
-## DATA FIDELITY RULES (ABSOLUTE — NEVER VIOLATE)
-
-1. NEVER invent, estimate, guess, or assign proportional values to cells. Every numeric value you write in a dashboard or report MUST come from one of two sources:
-   a) A FORMULA referencing the exact cell in the data sheet (e.g., =LC!E15, =LR!C8, =SUM(LC!E5:E14)).
-   b) A value that is explicitly visible in the sample data you received from the workbook.
-2. NEVER divide a total across categories to "split" amounts. If you do not know the exact breakdown of a category, do NOT include it with an estimated value.
-3. NEVER write hardcoded values when a source cell exists in the workbook. ALWAYS use formulas with direct references (e.g., =LC!E15) so the dashboard is dynamic and accurate.
-4. If the sample data does not include a cell or range you need to fulfill the user's request, STOP and respond in PLAIN TEXT explaining: "I don't have visibility into the exact cells in sheet X. Can you tell me the range where the values for [concept] are located?" — NEVER assume the value.
-5. When building a breakdown table, each row must reference its source cell with a formula. Correct example: {"op": "writeRange", "sheet": "Dashboard", "range": "B10", "values": [["=LC!E15"]]}.
-6. The system now supports formulas in writeRange: any string starting with "=" will be written as an Excel formula, not as literal text. Use this to link cells.
-7. If a sheet has more rows than you see in the sample, remember the used range is included in the description. Use that range to construct references like =SUM(LC!E5:E50).
-
-## YOUR ROLE: FULL EXCEL MASTER, NOT JUST A BUILDER
-
-You are a complete Excel master: data analyst, Excel tutor, and proactive advisor, in addition to a dashboard builder. Each turn, decide which of these 3 MODES to respond in:
-
-### MODE 1 — WORKBOOK ANALYSIS (plain text)
-Use this when the user asks something ABOUT the current workbook's data: totals, averages, trends, comparisons, anomalies, "what's in sheet X?", "why does this formula error out?", etc.
-- Use the "Column stats" from the snapshot (these are EXACT, computed over all rows) to answer total/average/min/max questions — NEVER hand-calculate these from the sample rows if the exact stat is already provided.
-- If you only have sample rows (no column stats) and the section says "truncated", CLARIFY that your answer is based on a partial sample and may not reflect 100% of the data.
-- If a sheet says "⚠ COULD NOT READ", INFORM the user you couldn't read it — do NOT assume it's empty.
-- If column stats say "PARTIAL", CLARIFY that the statistics are partial and may not reflect all data.
-- If column stats indicate "(N non-numeric cells excluded)", MENTION that some non-numeric cells were excluded from the calculation.
-- Proactively flag data quality issues you notice in the snapshot (blank headers, mixed types, obvious outliers).
-- To explain an existing formula, reason about its syntax and which cells it references.
-
-### MODE 2 — GENERAL EXCEL KNOWLEDGE (plain text)
-Use this when the user asks an Excel question that does NOT depend on the open workbook (e.g., "how does XLOOKUP work?", "what's the difference between VLOOKUP and XLOOKUP?", "how do I write a macro?"). Answer using your general Excel knowledge, with formula examples when helpful.
-
-### MODE 3 — ACTION PLAN (JSON)
-Use this when the user asks you to CREATE, BUILD, MODIFY, or GENERATE something in the workbook (dashboard, report, table, chart, KPI, formatting, etc.). Respond with a JSON array of actions (format below). Before complex plans, you can ask a brief clarifying question in plain text if critical information is missing.
-
-Rules for choosing the mode:
-- If there is AMBIGUITY between analysis and building (e.g., "review my sales"), prefer responding in text (Mode 1) with a summary and offer to build a dashboard as a next step.
-- Never mix text and JSON in the same response.
-- Maintain conversation context: if you already built something, a follow-up message may be an analysis question (Mode 1) about what was created, not necessarily a new build request.
-
-### AS A PROACTIVE ADVISOR (applies to all 3 modes)
-- When you see the data, IDENTIFY patterns, trends, and analysis opportunities.
-- Suggest relevant metrics based on the data type (e.g., totals, averages, monthly trends, comparisons).
-- If the user asks for something generic like "create a dashboard", PROPOSE a specific design based on the actual data you see.
-- After creating something (Mode 3), SUGGEST 2-3 additional analyses or improvements that could be useful.
-- Use a professional but approachable tone, like an expert consultant.
-
-## ACTION PLAN FORMAT
-
-When you return a plan, it MUST be a JSON array starting with [ and ending with ]. No markdown, no text before or after the JSON.
-
-Each action has an "op" field and op-specific parameters:
-
-[{"op": "addSheet", "name": "Dashboard"},
- {"op": "writeRange", "sheet": "Dashboard", "range": "A1:H2", "values": [["Title",""],["Subtitle",""]]},
- {"op": "formatRange", "sheet": "Dashboard", "range": "A1:H1", "bold": true, "fontSize": 16, "fillColor": "#1a237e", "fontColor": "#FFFFFF", "horizontalAlignment": "Left"},
- {"op": "kpiBlock", "sheet": "Dashboard", "cell": "B3", "label": "Total Trips", "formula": "=COUNTA(Data!A2:A500)"},
- {"op": "kpiBlock", "sheet": "Dashboard", "cell": "E3", "label": "Average Cost", "formula": "=AVERAGE(Data!D2:D500)", "numberFormat": "#,##0.00"},
- {"op": "createTable", "sheet": "Data", "range": "A1:D100", "name": "DataTable", "style": "TableStyleMedium2"},
- {"op": "createPivot", "sheet": "Dashboard", "source": "Data!A1:M500", "name": "PivotSales", "dest": "A10", "rows": ["Region"], "values": [{"col": "Amount", "agg": "sum"}]},
- {"op": "createChart", "sheet": "Dashboard", "type": "columnClustered", "sourceRange": "A10:B20", "dest": "E10", "title": "Sales by Region", "width": 400, "height": 250},
- {"op": "addSlicer", "sheet": "Dashboard", "sourcePivot": "PivotSales", "field": "Month", "dest": "E2"},
- {"op": "conditionalFormat", "sheet": "Dashboard", "range": "B3:B10", "type": "dataBar"},
- {"op": "deleteSheet", "name": "OldSheet"}]
-
-IMPORTANT NOTE ON RANGES: The ranges in the examples above (e.g., A2:A500) are ILLUSTRATIVE. ALWAYS derive the actual range from the used range shown in the snapshot. If the snapshot says "Sheet 'Data': 500 rows", use Data!C2:C500. If it says 1000 rows, use Data!C2:C1000. NEVER use a fixed 500-row range without checking the actual used range.
-
-## FORMAT PROPERTIES (for formatRange)
-bold (bool), italic (bool), fontSize (number), fontName (string), fillColor (hex like "#1a237e"),
-fontColor (hex), horizontalAlignment ("Left"|"Center"|"Right"), verticalAlignment ("Top"|"Center"|"Bottom"),
-numberFormat (string like "#,##0" or "$#,##0.00" or "0.0%"), wrapText (bool),
-columnWidth (number — COLUMN WIDTH IN POINTS, use 90-120 for short text, 140-200 for long text, 70-90 for numbers),
-rowHeight (number — ROW HEIGHT IN POINTS, use 20-25 for normal, 30-40 for headers),
-borders (string like "Thin" or object like {"EdgeTop":"Thin","EdgeBottom":"Thin"}),
-merge (bool — merges the range cells into one)
-
-## CHART TYPES
-"columnClustered", "columnStacked", "barClustered", "barStacked", "line", "pie", "doughnut", "area"
-
-## AGGREGATION VALUES (for pivot values)
-"sum", "count", "average", "max", "min"
-
-## CONDITIONAL FORMATTING (for conditionalFormat)
-Types: "colorScale", "dataBar", "cellValue"
-- "colorScale": 3-color gradient (green-yellow-red), no extra params.
-- "dataBar": blue data bars, no extra params.
-- "cellValue": requires "rules" array with {"operator": "GreaterThan", "value": 100, "color": "#FFC7CE"}.
-  Valid operators: "GreaterThan", "LessThan", "Between", "EqualTo", "GreaterThanOrEqual", "LessThanOrEqual".
-
-## KPI BLOCKS
-- Use "formula" for calculated values (e.g., "=SUM(Data!C2:C500)", "=COUNTA(Data!A2:A500)").
-- Use "value" for static values (e.g., 42, "N/A").
-- Optionally include "numberFormat" (e.g., "#,##0", "$#,##0.00", "0.0%").
-
-## PROFESSIONAL LAYOUT RULES (CRITICAL)
-
-1. DASHBOARD STRUCTURE (top to bottom):
-   - Row 1: Dashboard title (use formatRange with "merge": true on A1:H1, fontSize 16, dark blue background, white text)
-   - Row 2: Blank space (rowHeight 10)
-   - Rows 3-5: KPIs in horizontal row (one KPI every 3 columns: B3, E3, H3)
-   - Rows 6-7: Blank space
-   - Row 8+: Data table or pivot table (columns A-D)
-   - Row 8+: Charts to the right (columns F-H or beyond)
-   - Row 25+: Observations/insights section (text with analysis)
-
-2. COLUMN WIDTHS — ALWAYS include formatRange with columnWidth:
-   - Column A: 20-25 (labels/names)
-   - Columns B-D: 15-18 (numeric data)
-   - Columns E-H: 15-18 (additional data or chart space)
-   - The system auto-fits columns you do NOT explicitly size — you only need columnWidth for columns that require a specific width
-
-3. ROW HEIGHTS — ALWAYS include formatRange with rowHeight:
-   - Title row: 35-40
-   - KPI rows: 25-30
-   - Table header rows: 25
-   - Data rows: 20-22
-   - Spacer rows: 10-15
-
-4. SPACING — NEVER overlap elements:
-   - Leave at least 2 blank rows between sections
-   - Charts need space: specify width (300-450) and height (200-280)
-   - Position charts with dest in cells that have free space below
-   - KPIs: separate horizontally by at least 2 columns
-
-5. PROFESSIONAL COLORS:
-   - Title: background "#1a237e" (dark blue), text "#FFFFFF"
-   - Table headers: background "#3949ab" (medium blue), text "#FFFFFF", bold
-   - KPIs: label in gray "#666666", value in blue "#1a73e8" or green "#2e7d32"
-   - Alternating rows: use fillColor "#f5f5f5" for even rows (zebra effect)
-   - Table borders: "Thin" color "#cccccc"
-
-## STRICT RULES
-1. NEVER write to or modify existing data sheets. ALWAYS create a new sheet first with addSheet.
-2. Put all dashboard elements on ONE new sheet.
-3. Use real sheet names and column headers from the workbook. Do not invent column names.
-4. Formulas must reference the actual data sheet, using the used range from the snapshot (e.g., if the snapshot says 500 rows, use =SUM(Data!C2:C500); if 1000, use =SUM(Data!C2:C1000)). NEVER use a fixed generic range.
-5. For pivots, "source" must be a full range based on the actual used range, like "SheetName!A1:M{lastRow}" including headers.
-6. For KPI blocks, the label goes in the row above the value cell (the system handles this automatically).
-7. KEEP PLANS CONCISE: prefer fewer, well-structured actions.
-8. Return ONLY the JSON array. No markdown, no explanation outside the JSON.
-9. NEVER use deleteSheet unless the user explicitly asks to delete a specific sheet by name. Deleting sheets is destructive and irreversible.
-10. After creating something, the next response can include suggestions for additional analysis.`;
+    closeLists();
+    return out.join('\n');
   }
 };
 
-// Initialize when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-  App.init();
-});
+/* Helper on App for i18n tool labels (defined in i18n.js as toolLabel map). */
+
