@@ -6,8 +6,11 @@
 
 const I18n = {
   lang: 'es', // default to Spanish
+  initialized: false,
 
   init() {
+    if (this.initialized) return; // guard against double-init
+    this.initialized = true;
     try {
       if (typeof Office !== 'undefined' && Office.context && Office.context.displayLang) {
         const displayLang = Office.context.displayLang.toLowerCase();

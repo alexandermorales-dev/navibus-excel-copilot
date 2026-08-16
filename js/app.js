@@ -60,14 +60,21 @@ const App = {
 
     this.el.clearChatBtn.addEventListener('click', () => this.clearChat());
 
-    if (typeof Office !== 'undefined') {
+    if (typeof Office !== 'undefined' && Office.onReady) {
       Office.onReady((info) => {
-        if (info.host === Office.HostType.Excel) {
-          console.log('Excel AI Copilot ready');
-        }
+        try {
+          if (info && info.host === Office.HostType.Excel) {
+            console.log('Excel AI Copilot ready');
+          }
+        } catch (e) { /* info or HostType may be undefined outside Excel */ }
         I18n.init();
         this.localizeUI();
       });
+      // Fallback: if Office.onReady doesn't fire within 3s (e.g. outside
+      // Excel), initialize i18n anyway so the UI isn't stuck in default lang.
+      setTimeout(() => {
+        if (!I18n.initialized) { I18n.init(); this.localizeUI(); }
+      }, 3000);
     } else {
       console.warn('Office.js not loaded — running in browser dev mode');
       I18n.init();
