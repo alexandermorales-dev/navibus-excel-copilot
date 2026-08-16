@@ -13,8 +13,7 @@ const Config = {
   // pool so it's tried first, then we cycle through these.
   // Stored base64-encoded to avoid plaintext exposure in the repo.
   _encodedKeys: [
-    'QVEuQWI4Uk42SzN2X3l4S0hqZjB6YnRmY3d5b2ptY0hVbHpFUGpEaEZoWVY2QzdQZi1RR2c=',
-    'QVEuQWI4Uk42TEp2dDRNTHRBUHJYTGFzOHNvTnU3YVl5OXA2ZmctRHROUHNkTVExR0ZMRnc=',
+    'QVEuQWI4Uk42SU8yWTdSYU83a3l4VDVxWkM0ZkppWVZqQzhSekZFUDJDUGl0Y21wNG81Wmc=',
     'QVEuQWI4Uk42STVZZmJRbzZDY19fUll1T05hb2FiOHctWjFOOUttQnVLQnotSEQ2cmJzc1E='
   ],
 
