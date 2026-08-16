@@ -6,6 +6,11 @@
 
 const Executor = {
   artifacts: [],  // { type, name, sheet } — created in current run
+  // Tracks columns/rows explicitly sized during the run so autoFit can skip them.
+  sizedCols: new Set(),  // "sheetName:colLetter"
+  sizedRows: new Set(),  // "sheetName:rowNumber"
+  // Names of sheets created during the current run (for deleteSheet guard).
+  createdSheetNames: new Set(),
 
   // Ops that are independent/decorative — if they fail, the earlier
   // successful artifacts (sheets, tables, pivots, data) are still useful
@@ -14,6 +19,9 @@ const Executor = {
 
   clearArtifacts() {
     this.artifacts = [];
+    this.sizedCols = new Set();
+    this.sizedRows = new Set();
+    this.createdSheetNames = new Set();
   },
 
   /**
@@ -49,7 +57,7 @@ const Executor = {
       }
     }
 
-    // Post-execution: auto-fit columns on any sheet we created
+    // Post-execution: auto-fit only columns/rows NOT explicitly sized during the run
     const createdSheets = [...new Set(this.artifacts.filter(a => a.type === 'sheet').map(a => a.name))];
     for (const sheetName of createdSheets) {
       try {
@@ -71,15 +79,35 @@ const Executor = {
     await Excel.run(async (ctx) => {
       const sheet = ctx.workbook.worksheets.getItem(sheetName);
       const usedRange = sheet.getUsedRangeOrNullObject();
-      usedRange.load('address');
+      usedRange.load('address, rowCount, columnCount');
       await ctx.sync();
 
       if (usedRange.isNullObject) return;
 
-      // Get the used range and auto-fit columns
-      const range = sheet.getUsedRange();
-      range.format.autofitColumns();
-      range.format.autofitRows();
+      // Auto-fit only columns that were NOT explicitly sized during the run.
+      // We do this column-by-column to skip the ones in sizedCols.
+      const colCount = usedRange.columnCount;
+      const rowCount = usedRange.rowCount;
+      const startCol = this.colToLetter(1);
+
+      for (let c = 0; c < colCount; c++) {
+        const colLetter = this.colToLetter(c + 1);
+        const colKey = `${sheetName}:${colLetter}`;
+        if (this.sizedCols.has(colKey)) continue;
+        // Auto-fit this single column
+        const colRange = sheet.getRange(`${colLetter}1:${colLetter}${rowCount}`);
+        colRange.format.autofitColumns();
+      }
+
+      // Auto-fit only rows that were NOT explicitly sized during the run.
+      for (let r = 0; r < rowCount; r++) {
+        const rowNum = r + 1;
+        const rowKey = `${sheetName}:${rowNum}`;
+        if (this.sizedRows.has(rowKey)) continue;
+        const rowRange = sheet.getRange(`${startCol}${rowNum}:${this.colToLetter(colCount)}${rowNum}`);
+        rowRange.format.autofitRows();
+      }
+
       await ctx.sync();
     });
   },
@@ -105,6 +133,7 @@ const Executor = {
           sheet.tabColor = '#4a9eff';
         }
         this.artifacts.push({ type: 'sheet', name: action.name });
+        this.createdSheetNames.add(action.name);
         await ctx.sync();
       });
     },
@@ -147,6 +176,12 @@ const Executor = {
         if (action.numberFormat) {
           targetRange.numberFormat = action.numberFormat;
         }
+
+        // Track as artifact if writing to a pre-existing sheet (for rollback)
+        if (!this.createdSheetNames.has(action.sheet)) {
+          this.artifacts.push({ type: 'write', sheet: action.sheet, range: action.range });
+        }
+
         await ctx.sync();
       });
     },
@@ -171,8 +206,25 @@ const Executor = {
         }
         if (action.wrapText !== undefined) fmt.wrapText = action.wrapText;
         if (action.numberFormat !== undefined) range.numberFormat = action.numberFormat;
-        if (action.columnWidth !== undefined) fmt.columnWidth = action.columnWidth;
-        if (action.rowHeight !== undefined) fmt.rowHeight = action.rowHeight;
+        if (action.columnWidth !== undefined) {
+          fmt.columnWidth = action.columnWidth;
+          // Track which columns were explicitly sized
+          const cols = this.extractColsFromRange(action.range);
+          for (const col of cols) {
+            this.sizedCols.add(`${action.sheet}:${col}`);
+          }
+        }
+        if (action.rowHeight !== undefined) {
+          fmt.rowHeight = action.rowHeight;
+          // Track which rows were explicitly sized
+          const rows = this.extractRowsFromRange(action.range);
+          for (const row of rows) {
+            this.sizedRows.add(`${action.sheet}:${row}`);
+          }
+        }
+        if (action.merge) {
+          range.merge(true);  // across, then down
+        }
 
         if (action.borders) {
           this.applyBorders(ctx, range, action.borders);
@@ -187,7 +239,14 @@ const Executor = {
         const sheet = ctx.workbook.worksheets.getItem(action.sheet);
 
         const cellAddr = action.cell;
-        const labelAddr = this.offsetCell(action.cell, -1, 0);
+        // If the value cell is in row 1, place label to the LEFT instead of above
+        const cellRow = this.parseRowNum(cellAddr);
+        let labelAddr;
+        if (cellRow <= 1) {
+          labelAddr = this.offsetCell(action.cell, 0, -1);
+        } else {
+          labelAddr = this.offsetCell(action.cell, -1, 0);
+        }
 
         // Label cell — small, gray, bold
         const labelRange = sheet.getRange(labelAddr);
@@ -377,6 +436,11 @@ const Executor = {
     },
 
     async deleteSheet(action) {
+      // Safety guard: only allow deleting sheets created in the current run.
+      // Deleting pre-existing user sheets is destructive and irreversible.
+      if (!this.createdSheetNames.has(action.name)) {
+        throw new Error(`Refused to delete sheet "${action.name}" — it was not created in this session. Sheet deletion is irreversible; ask the user to delete it manually if needed.`);
+      }
       await Excel.run(async (ctx) => {
         const sheet = ctx.workbook.worksheets.getItem(action.name);
         sheet.delete();
@@ -421,6 +485,11 @@ const Executor = {
           } else if (art.type === 'slicer') {
             const slicer = ctx.workbook.slicers.getItem(art.name);
             slicer.delete();
+          } else if (art.type === 'write') {
+            // Clear values written to a pre-existing sheet during the run
+            const sheet = ctx.workbook.worksheets.getItem(art.sheet);
+            const range = sheet.getRange(art.range);
+            range.clear();
           }
         } catch (e) {
           // Best-effort rollback; log but don't throw
@@ -434,6 +503,72 @@ const Executor = {
   },
 
   // --- Helpers ---
+
+  /**
+   * Convert a 1-based column index to Excel column letter(s).
+   */
+  colToLetter(n) {
+    let result = '';
+    while (n > 0) {
+      const rem = (n - 1) % 26;
+      result = String.fromCharCode(65 + rem) + result;
+      n = Math.floor((n - 1) / 26);
+    }
+    return result;
+  },
+
+  /**
+   * Parse the row number from a cell address like "B3" → 3.
+   */
+  parseRowNum(cellAddr) {
+    const match = cellAddr.match(/^([A-Z]+)(\d+)$/);
+    return match ? parseInt(match[2], 10) : 0;
+  },
+
+  /**
+   * Extract all column letters from a range string like "A1:H1" → ["A","B",..."H"].
+   */
+  extractColsFromRange(rangeStr) {
+    const rangePart = rangeStr.includes('!') ? rangeStr.split('!')[1] : rangeStr;
+    const match = rangePart.match(/^([A-Z]+)\d+(?::([A-Z]+)\d+)?$/);
+    if (!match) return [];
+    const startCol = match[1];
+    const endCol = match[2] || match[1];
+    const startNum = this.letterToNum(startCol);
+    const endNum = this.letterToNum(endCol);
+    const cols = [];
+    for (let i = startNum; i <= endNum; i++) {
+      cols.push(this.colToLetter(i));
+    }
+    return cols;
+  },
+
+  /**
+   * Extract all row numbers from a range string like "A1:A10" → [1,2,...10].
+   */
+  extractRowsFromRange(rangeStr) {
+    const rangePart = rangeStr.includes('!') ? rangeStr.split('!')[1] : rangeStr;
+    const match = rangePart.match(/^[A-Z]+(\d+)(?::[A-Z]+(\d+))?$/);
+    if (!match) return [];
+    const startRow = parseInt(match[1], 10);
+    const endRow = match[2] ? parseInt(match[2], 10) : startRow;
+    const rows = [];
+    for (let i = startRow; i <= endRow; i++) {
+      rows.push(i);
+    }
+    return rows;
+  },
+
+  /**
+   * Convert column letter(s) to 1-based number. "A" → 1, "Z" → 26, "AA" → 27.
+   */
+  letterToNum(colStr) {
+    let num = 0;
+    for (let i = 0; i < colStr.length; i++) {
+      num = num * 26 + (colStr.charCodeAt(i) - 64);
+    }
+    return num;
+  },
 
   mapAggregation(agg) {
     const map = {
@@ -452,12 +587,17 @@ const Executor = {
   },
 
   offsetCell(cellAddr, rowOffset, colOffset) {
-    // Parse "B2" → {col: 2, row: 2} → offset → return "B1"
+    // Parse "B2" → {col: "B", row: 2} → apply offsets → return new address
     const match = cellAddr.match(/^([A-Z]+)(\d+)$/);
     if (!match) return cellAddr;
     const colStr = match[1];
     const rowNum = parseInt(match[2], 10) + rowOffset;
     if (rowNum < 1) return cellAddr; // can't go above row 1
+    if (colOffset && colOffset !== 0) {
+      const colNum = this.letterToNum(colStr) + colOffset;
+      if (colNum < 1) return cellAddr; // can't go left of column A
+      return this.colToLetter(colNum) + rowNum;
+    }
     return colStr + rowNum;
   },
 

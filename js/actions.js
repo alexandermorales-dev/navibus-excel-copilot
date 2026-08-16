@@ -85,7 +85,7 @@ const Actions = {
       const fmtProps = ['bold', 'italic', 'fontSize', 'fontName', 'fillColor',
                         'fontColor', 'horizontalAlignment', 'verticalAlignment',
                         'numberFormat', 'wrapText', 'columnWidth', 'rowHeight',
-                        'borders'];
+                        'borders', 'merge'];
       const hasAny = fmtProps.some(p => action[p] !== undefined);
       if (!hasAny) {
         errors.push(`${prefix}: at least one format property is required (${fmtProps.join(', ')}).`);

@@ -252,6 +252,14 @@ const I18n = {
       es: (n, total) => `Intento de reparación ${n}/${total}...`,
       en: (n, total) => `Repair attempt ${n}/${total}...`
     },
+    rollbackNote: {
+      es: 'NOTA DEL SISTEMA: El plan anterior falló y fue completamente revertido. El libro NO contiene los elementos del plan fallido. El estado del libro es el mismo que antes del intento.',
+      en: 'SYSTEM NOTE: The previous plan failed and was fully rolled back. The workbook does NOT contain the elements from the failed plan. The workbook state is the same as before the attempt.'
+    },
+    deleteSheetGuardError: {
+      es: (name) => `No se puede eliminar la hoja "${name}" — no fue creadada en esta sesión. La eliminación de hojas es irreversible; pide al usuario que la elimine manualmente si es necesario.`,
+      en: (name) => `Cannot delete sheet "${name}" — it was not created in this session. Sheet deletion is irreversible; ask the user to delete it manually if needed.`
+    },
 
     // --- Gemini API status messages ---
     dailyQuota: {

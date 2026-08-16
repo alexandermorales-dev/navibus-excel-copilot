@@ -160,11 +160,12 @@ const App = {
   },
 
   async runAgentLoop(userText, typingEl) {
-    // 1. Read workbook schema
+    // 1. Read workbook schema (tag copilot-created sheets from prior runs)
     this.updateTypingText(typingEl, I18n.t('analyzing'));
     let schemaSnap;
     try {
-      schemaSnap = await Schema.snapshot();
+      const copilotSheets = [...(Executor.createdSheetNames || [])];
+      schemaSnap = await Schema.snapshot(copilotSheets);
     } catch (e) {
       this.removeElement(typingEl);
       this.addErrorMessageWithRetry(`${I18n.t('workbookError')}: ${e.message}`);
@@ -201,22 +202,24 @@ const App = {
     // 4. Parse the response
     const parsed = Repair.parsePlan(result.text);
     if (!parsed.ok) {
-      // Not a JSON plan â€” treat as a text response
+      // Not a JSON plan — treat as a text response
       this.addMessage('assistant', result.text);
       this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
       return;
     }
 
-    // 6. Validate the plan
+    // 5. Validate the plan
     const validation = Actions.validatePlan(parsed.plan);
     if (!validation.valid) {
       this.addMessage('system', `${I18n.t('validationFailed')}:\n${validation.errors.join('\n')}`);
+      // Push the failed plan to conversation for context consistency
+      this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
       const failedAsActions = validation.errors.map((err, i) => ({ index: i, op: 'validation', error: err }));
       await this.attemptRepair(systemPrompt, failedAsActions, schemaSnap, parsed.plan, [], 'full');
       return;
     }
 
-    // 7. Execute the plan with live progress
+    // 6. Execute the plan with live progress
     this.conversation.push({ role: 'model', parts: [{ text: result.text }] });
     const progressEl = this.addProgressMessage(parsed.plan);
 
@@ -226,23 +229,31 @@ const App = {
 
     this.finalizeProgress(progressEl);
 
-    // 8. Show results
+    // 7. Show results
     this.showRunSummary(execResult);
 
     if (execResult.failed.length > 0) {
       this.addMessage('system', I18n.t('execFailed'));
+      // On full rollback, add corrective note to conversation so the model
+      // doesn't think the dashboard still exists on the next turn.
+      if (execResult.rolledBack === 'full') {
+        this.conversation.push({
+          role: 'user',
+          parts: [{ text: I18n.t('rollbackNote') }]
+        });
+      }
       await this.attemptRepair(systemPrompt, execResult.failed, schemaSnap, parsed.plan, execResult.succeeded, execResult.rolledBack);
     } else {
-      // 9. Generate a final summary + suggestions message
-      await this.generateSummaryAndSuggestions(parsed.plan, execResult, schemaSnap);
+      // 8. Generate a final summary + suggestions message
+      await this.generateSummaryAndSuggestions(parsed.plan, execResult, schemaSnap, systemPrompt);
     }
   },
 
-  async generateSummaryAndSuggestions(plan, execResult, schemaSnap) {
-    // Build a short prompt asking for a summary of what was done + suggestions
-    const planSummary = plan.map(a => {
-      const label = I18n.t('opLabel');
+  async generateSummaryAndSuggestions(plan, execResult, schemaSnap, systemPrompt) {
+    // Build a description of what was ACTUALLY executed (not the original plan)
+    const executedActions = execResult.succeeded.map(s => {
       const opLabels = I18n.strings.opLabel;
+      const a = s.action;
       switch (a.op) {
         case 'addSheet': return `${opLabels.addSheet[I18n.lang]} "${a.name}"`;
         case 'kpiBlock': return `KPI "${a.label}"`;
@@ -257,10 +268,12 @@ const App = {
       }
     }).join(', ');
 
-    const summaryPrompt = I18n.tf('summaryPrompt', planSummary, Schema.toText(schemaSnap));
+    const summaryPrompt = I18n.tf('summaryPrompt', executedActions, Schema.toText(schemaSnap));
 
+    // Use the real system prompt (with fidelity rules) as system instruction,
+    // and the summary request as a user message — not duplicated.
     const result = await Gemini.generateWithFallback(
-      summaryPrompt,
+      systemPrompt,
       [{ role: 'user', parts: [{ text: summaryPrompt }] }],
       null  // no thinking callback for this short call
     );
@@ -282,11 +295,22 @@ const App = {
         this.addMessage('system', I18n.tf('repairAttempt', attempt, maxAttempts));
       }
 
+      // Re-snapshot the workbook before each repair attempt so the repair
+      // prompt has accurate ground truth (sheets may have been created/kept).
+      let freshSnap;
+      try {
+        const copilotSheets = [...(Executor.createdSheetNames || [])];
+        freshSnap = await Schema.snapshot(copilotSheets);
+      } catch (e) {
+ // If snapshot fails, fall back to the stale one — better than nothing.
+        freshSnap = schemaSnap;
+      }
+
       const repairResult = await Repair.repairActions(
         systemPrompt,
         this.conversation,
         currentFailed,
-        schemaSnap,
+        freshSnap,
         currentPlan,
         currentRollback,
         currentSucceeded
@@ -297,12 +321,26 @@ const App = {
         return;
       }
 
+      // Push the repair exchange into conversation history for future context.
+      this.conversation.push({
+        role: 'model',
+        parts: [{ text: JSON.stringify(repairResult.plan) }]
+      });
+
       // Execute repaired plan
       const execResult = await Executor.execute(repairResult.plan);
       this.showRunSummary(execResult);
 
       if (execResult.failed.length === 0) {
         return; // repaired successfully
+      }
+
+      // On full rollback, add corrective note so model knows state was reverted.
+      if (execResult.rolledBack === 'full') {
+        this.conversation.push({
+          role: 'user',
+          parts: [{ text: I18n.t('rollbackNote') }]
+        });
       }
 
       // Prepare for another repair round, if any attempts remain
@@ -682,6 +720,9 @@ Eres un maestro de Excel completo: analista de datos, profesor de Excel y asesor
 Úsalo cuando el usuario pregunte algo SOBRE los datos del libro actual: totales, promedios, tendencias, comparaciones, anomalías, "¿qué contiene la hoja X?", "¿por qué esta fórmula da error?", etc.
 - Usa los "Column stats" del snapshot (son EXACTOS, calculados sobre todas las filas) para responder preguntas de totales/promedios/min/max — NUNCA los calcules a mano desde las sample rows si ya existe la estadística exacta.
 - Si solo tienes sample rows (sin column stats) y la sección dice "truncated", ACLARA que tu respuesta se basa en una muestra parcial y podría no reflejar el 100% de los datos.
+- Si una hoja dice "⚠ COULD NOT READ", INFORMA al usuario que no pudiste leerla — NO la asumas vacía.
+- Si los column stats dicen "PARTIAL", ACLARA que las estadísticas son parciales y pueden no reflejar todos los datos.
+- Si los column stats indican "(N non-numeric cells excluded)", MENCIONA que algunas celdas no numéricas fueron excluidas del cálculo.
 - Señala proactivamente problemas de calidad de datos que notes en el snapshot (encabezados vacíos, tipos mixtos, valores atípicos evidentes).
 - Para explicar una fórmula existente, razona sobre su sintaxis y qué celdas referencia.
 
@@ -721,19 +762,29 @@ Cada acción tiene un campo "op" y parámetros específicos:
  {"op": "conditionalFormat", "sheet": "Panel_Control", "range": "B3:B10", "type": "dataBar"},
  {"op": "deleteSheet", "name": "HojaVieja"}]
 
+NOTA IMPORTANTE SOBRE RANGOS: Los rangos en los ejemplos anteriores (ej: A2:A500) son ILUSTRATIVOS. SIEMPRE deriva el rango real del used range mostrado en el snapshot. Si el snapshot dice "Sheet 'Datos': 500 rows", usa Datos!C2:C500. Si dice 1000 rows, usa Datos!C2:C1000. NUNCA uses un rango fijo de 500 filas sin verificar el used range real.
+
 ## PROPIEDADES DE FORMATO (para formatRange)
 bold (bool), italic (bool), fontSize (number), fontName (string), fillColor (hex como "#1a237e"),
 fontColor (hex), horizontalAlignment ("Left"|"Center"|"Right"), verticalAlignment ("Top"|"Center"|"Bottom"),
 numberFormat (string como "#,##0" o "\u20ac#,##0.00" o "0.0%"), wrapText (bool),
-columnWidth (number — ANCHO DE COLUMNA EN PIXELES, usar 15-20 para texto corto, 25-35 para texto largo, 12-15 para números),
-rowHeight (number — ALTO DE FILA, usar 20-25 para normal, 30-40 para encabezados),
-borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"})
+columnWidth (number — ANCHO DE COLUMNA EN PUNTOS, usar 90-120 para texto corto, 140-200 para texto largo, 70-90 para números),
+rowHeight (number — ALTO DE FILA EN PUNTOS, usar 20-25 para normal, 30-40 para encabezados),
+borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}),
+merge (bool — fusiona las celdas del rango en una sola)
 
 ## TIPOS DE GRÁFICO
 "columnClustered", "columnStacked", "barClustered", "barStacked", "line", "pie", "doughnut", "area"
 
 ## AGREGACIONES (para tablas dinámicas)
 "sum", "count", "average", "max", "min"
+
+## FORMATO CONDICIONAL (para conditionalFormat)
+Tipos: "colorScale", "dataBar", "cellValue"
+- "colorScale": gradiente de 3 colores (verde-amarillo-rojo), sin parámetros extra.
+- "dataBar": barras de datos azules, sin parámetros extra.
+- "cellValue": requiere "rules" array con objetos {"operator": "GreaterThan", "value": 100, "color": "#FFC7CE"}.
+  Operadores válidos: "GreaterThan", "LessThan", "Between", "EqualTo", "GreaterThanOrEqual", "LessThanOrEqual".
 
 ## KPI BLOCKS
 - Usa "formula" para valores calculados (ej: "=SUM(Datos!C2:C500)", "=COUNTA(Datos!A2:A500)").
@@ -743,7 +794,7 @@ borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}
 ## REGLAS DE LAYOUT PROFESIONAL (CRÍTICO)
 
 1. ESTRUCTURA DEL PANEL (de arriba a abajo):
-   - Fila 1: Título del panel (combinar A1:H1, fontSize 16, fondo azul oscuro, texto blanco)
+   - Fila 1: Título del panel (usar formatRange con "merge": true en A1:H1, fontSize 16, fondo azul oscuro, texto blanco)
    - Fila 2: Espacio en blanco (rowHeight 10)
    - Filas 3-5: KPIs en fila horizontal (un KPI cada 3 columnas: B3, E3, H3)
    - Fila 6-7: Espacio en blanco
@@ -755,7 +806,7 @@ borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}
    - Columna A: 20-25 (etiquetas/nombres)
    - Columnas B-D: 15-18 (datos numéricos)
    - Columnas E-H: 15-18 (datos adicionales o espacio para gráficos)
-   - NUNCA dejar columnas con ancho por defecto — siempre especificar columnWidth
+   - El sistema auto-ajusta las columnas que NO dimensiones explícitamente — solo necesitas columnWidth para columnas que requieren un ancho específico
 
 3. ALTOS DE FILA — SIEMPRE incluir formatRange con rowHeight:
    - Fila de título: 35-40
@@ -781,12 +832,13 @@ borders (string como "Thin" o objeto como {"EdgeTop":"Thin","EdgeBottom":"Thin"}
 1. NUNCA escribas o modifiques hojas de datos existentes. SIEMPRE crea una hoja nueva primero con addSheet.
 2. Pon todos los elementos del panel en UNA hoja nueva.
 3. Usa nombres reales de hojas y columnas del libro. NO inventes nombres de columnas.
-4. Las fórmulas deben referenciar la hoja de datos real (ej: =SUM(Datos!C2:C500)).
-5. Para tablas dinámicas, "source" debe ser un rango completo como "Hoja!A1:M500" incluyendo encabezados.
+4. Las fórmulas deben referenciar la hoja de datos real, usando el used range del snapshot (ej: si el snapshot dice 500 filas, usa =SUM(Datos!C2:C500); si dice 1000, usa =SUM(Datos!C2:C1000)). NUNCA uses un rango fijo genérico.
+5. Para tablas dinámicas, "source" debe ser un rango completo basado en el used range real, como "Hoja!A1:M{lastRow}" incluyendo encabezados.
 6. Para KPIs, la etiqueta va en la fila encima del valor (el sistema lo maneja automáticamente).
 7. MANTÉN LOS PLANES CONCISOS: prefiere menos acciones bien estructuradas.
 8. Devuelve SOLO el array JSON. Sin markdown, sin explicación fuera del JSON.
-9. Después de crear algo, la próxima respuesta puede incluir sugerencias de análisis adicionales.`;
+9. NUNCA uses deleteSheet a menos que el usuario pida explícitamente eliminar una hoja por nombre. Eliminar hojas es destructivo e irreversible.
+10. Después de crear algo, la próxima respuesta puede incluir sugerencias de análisis adicionales.`;
   },
 
   buildEnglish(schemaText) {
@@ -819,6 +871,9 @@ You are a complete Excel master: data analyst, Excel tutor, and proactive adviso
 Use this when the user asks something ABOUT the current workbook's data: totals, averages, trends, comparisons, anomalies, "what's in sheet X?", "why does this formula error out?", etc.
 - Use the "Column stats" from the snapshot (these are EXACT, computed over all rows) to answer total/average/min/max questions — NEVER hand-calculate these from the sample rows if the exact stat is already provided.
 - If you only have sample rows (no column stats) and the section says "truncated", CLARIFY that your answer is based on a partial sample and may not reflect 100% of the data.
+- If a sheet says "⚠ COULD NOT READ", INFORM the user you couldn't read it — do NOT assume it's empty.
+- If column stats say "PARTIAL", CLARIFY that the statistics are partial and may not reflect all data.
+- If column stats indicate "(N non-numeric cells excluded)", MENTION that some non-numeric cells were excluded from the calculation.
 - Proactively flag data quality issues you notice in the snapshot (blank headers, mixed types, obvious outliers).
 - To explain an existing formula, reason about its syntax and which cells it references.
 
@@ -858,19 +913,29 @@ Each action has an "op" field and op-specific parameters:
  {"op": "conditionalFormat", "sheet": "Dashboard", "range": "B3:B10", "type": "dataBar"},
  {"op": "deleteSheet", "name": "OldSheet"}]
 
+IMPORTANT NOTE ON RANGES: The ranges in the examples above (e.g., A2:A500) are ILLUSTRATIVE. ALWAYS derive the actual range from the used range shown in the snapshot. If the snapshot says "Sheet 'Data': 500 rows", use Data!C2:C500. If it says 1000 rows, use Data!C2:C1000. NEVER use a fixed 500-row range without checking the actual used range.
+
 ## FORMAT PROPERTIES (for formatRange)
 bold (bool), italic (bool), fontSize (number), fontName (string), fillColor (hex like "#1a237e"),
 fontColor (hex), horizontalAlignment ("Left"|"Center"|"Right"), verticalAlignment ("Top"|"Center"|"Bottom"),
 numberFormat (string like "#,##0" or "$#,##0.00" or "0.0%"), wrapText (bool),
-columnWidth (number — COLUMN WIDTH IN PIXELS, use 15-20 for short text, 25-35 for long text, 12-15 for numbers),
-rowHeight (number — ROW HEIGHT, use 20-25 for normal, 30-40 for headers),
-borders (string like "Thin" or object like {"EdgeTop":"Thin","EdgeBottom":"Thin"})
+columnWidth (number — COLUMN WIDTH IN POINTS, use 90-120 for short text, 140-200 for long text, 70-90 for numbers),
+rowHeight (number — ROW HEIGHT IN POINTS, use 20-25 for normal, 30-40 for headers),
+borders (string like "Thin" or object like {"EdgeTop":"Thin","EdgeBottom":"Thin"}),
+merge (bool — merges the range cells into one)
 
 ## CHART TYPES
 "columnClustered", "columnStacked", "barClustered", "barStacked", "line", "pie", "doughnut", "area"
 
 ## AGGREGATION VALUES (for pivot values)
 "sum", "count", "average", "max", "min"
+
+## CONDITIONAL FORMATTING (for conditionalFormat)
+Types: "colorScale", "dataBar", "cellValue"
+- "colorScale": 3-color gradient (green-yellow-red), no extra params.
+- "dataBar": blue data bars, no extra params.
+- "cellValue": requires "rules" array with {"operator": "GreaterThan", "value": 100, "color": "#FFC7CE"}.
+  Valid operators: "GreaterThan", "LessThan", "Between", "EqualTo", "GreaterThanOrEqual", "LessThanOrEqual".
 
 ## KPI BLOCKS
 - Use "formula" for calculated values (e.g., "=SUM(Data!C2:C500)", "=COUNTA(Data!A2:A500)").
@@ -880,7 +945,7 @@ borders (string like "Thin" or object like {"EdgeTop":"Thin","EdgeBottom":"Thin"
 ## PROFESSIONAL LAYOUT RULES (CRITICAL)
 
 1. DASHBOARD STRUCTURE (top to bottom):
-   - Row 1: Dashboard title (merge A1:H1, fontSize 16, dark blue background, white text)
+   - Row 1: Dashboard title (use formatRange with "merge": true on A1:H1, fontSize 16, dark blue background, white text)
    - Row 2: Blank space (rowHeight 10)
    - Rows 3-5: KPIs in horizontal row (one KPI every 3 columns: B3, E3, H3)
    - Rows 6-7: Blank space
@@ -892,7 +957,7 @@ borders (string like "Thin" or object like {"EdgeTop":"Thin","EdgeBottom":"Thin"
    - Column A: 20-25 (labels/names)
    - Columns B-D: 15-18 (numeric data)
    - Columns E-H: 15-18 (additional data or chart space)
-   - NEVER leave columns with default width — always specify columnWidth
+   - The system auto-fits columns you do NOT explicitly size — you only need columnWidth for columns that require a specific width
 
 3. ROW HEIGHTS — ALWAYS include formatRange with rowHeight:
    - Title row: 35-40
@@ -918,12 +983,13 @@ borders (string like "Thin" or object like {"EdgeTop":"Thin","EdgeBottom":"Thin"
 1. NEVER write to or modify existing data sheets. ALWAYS create a new sheet first with addSheet.
 2. Put all dashboard elements on ONE new sheet.
 3. Use real sheet names and column headers from the workbook. Do not invent column names.
-4. Formulas must reference the actual data sheet (e.g., =SUM(Data!C2:C500)).
-5. For pivots, "source" must be a full range like "SheetName!A1:M500" including headers.
+4. Formulas must reference the actual data sheet, using the used range from the snapshot (e.g., if the snapshot says 500 rows, use =SUM(Data!C2:C500); if 1000, use =SUM(Data!C2:C1000)). NEVER use a fixed generic range.
+5. For pivots, "source" must be a full range based on the actual used range, like "SheetName!A1:M{lastRow}" including headers.
 6. For KPI blocks, the label goes in the row above the value cell (the system handles this automatically).
 7. KEEP PLANS CONCISE: prefer fewer, well-structured actions.
 8. Return ONLY the JSON array. No markdown, no explanation outside the JSON.
-9. After creating something, the next response can include suggestions for additional analysis.`;
+9. NEVER use deleteSheet unless the user explicitly asks to delete a specific sheet by name. Deleting sheets is destructive and irreversible.
+10. After creating something, the next response can include suggestions for additional analysis.`;
   }
 };
 
