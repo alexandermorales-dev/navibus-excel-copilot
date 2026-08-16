@@ -58,7 +58,11 @@ const Gemini = {
     let lastError = '';
     let lastErrorType = 'unknown';
 
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Ensure we try every key in the pool at least once before giving up.
+    const pool = Config.keyPool();
+    const effectiveMaxRetries = Math.max(maxRetries, pool.length + 2);
+
+    for (let attempt = 0; attempt < effectiveMaxRetries; attempt++) {
       // Honor an external abort (user clicked Stop) between retries too.
       if (signal && signal.aborted) {
         return { ok: false, error: I18n.t('aborted'), errorType: 'aborted', retry: false };
@@ -97,45 +101,38 @@ const Gemini = {
           const delay = this.parseRetryDelay(errBody);
           const isDaily = this.isDailyQuota(errBody);
 
-          if (isDaily) {
-            // This key's daily quota is gone — rotate to the next key
-            // immediately instead of failing. Only fail if ALL keys are
-            // daily-exhausted (checked by letting the loop exhaust retries).
-            const pool = Config.keyPool();
-            if (attempt < maxRetries - 1 && pool.length > 1) {
-              // nextKey() already advanced; just retry with a different key.
-              continue;
-            }
-            return {
-              ok: false,
-              error: I18n.t('dailyQuota'),
-              errorType: 'quota_daily',
-              retry: false
-            };
-          }
+          console.log(`429: key ${attempt % pool.length}/${pool.length}, daily=${isDaily}, delay=${delay}s, body=${this.truncate(errBody, 200)}`);
 
-          lastErrorType = 'rate_limit';
-          // On 429, the next attempt will already use a different key
-          // (round-robin). Only wait if we've cycled through all keys.
-          const pool = Config.keyPool();
-          const waitSec = delay > 0 ? Math.min(delay, 65) : this.backoffSeconds(20, attempt);
-          lastError = I18n.tf('rateLimit', waitSec);
-          if (attempt < maxRetries - 1) {
+          if (attempt < effectiveMaxRetries - 1) {
             if (pool.length > 1) {
-              // More keys available — retry immediately with the next key.
+              // More keys to try — rotate immediately without waiting.
               continue;
             }
+            // Only one key — must wait for the rate limit to clear.
+            const waitSec = delay > 0 ? Math.min(delay, 65) : this.backoffSeconds(20, attempt);
+            lastError = I18n.tf('rateLimit', waitSec);
+            lastErrorType = isDaily ? 'quota_daily' : 'rate_limit';
             App.showStatus(I18n.tf('rateLimit', waitSec));
             await this.sleep(waitSec * 1000, signal);
             App.hideStatus();
+            continue;
           }
-          continue;
+
+          // Exhausted all retries across all keys.
+          lastError = isDaily ? I18n.t('dailyQuota') : I18n.tf('rateLimit', delay > 0 ? delay : 20);
+          lastErrorType = isDaily ? 'quota_daily' : 'rate_limit';
+          return {
+            ok: false,
+            error: lastError,
+            errorType: lastErrorType,
+            retry: false
+          };
         }
 
         if (resp.status >= 500) {
           lastError = I18n.tf('serverError', resp.status);
           lastErrorType = 'server';
-          if (attempt < maxRetries - 1) {
+          if (attempt < effectiveMaxRetries - 1) {
             await this.sleep(this.backoffSeconds(3, attempt) * 1000, signal);
           }
           continue;
@@ -161,7 +158,7 @@ const Gemini = {
           lastError = I18n.tf('networkError', e.message);
           lastErrorType = 'network';
         }
-        if (attempt < maxRetries - 1) {
+        if (attempt < effectiveMaxRetries - 1) {
           await this.sleep(this.backoffSeconds(2, attempt) * 1000, signal);
         }
       }
@@ -312,7 +309,9 @@ const Gemini = {
   },
 
   isDailyQuota(errBody) {
-    return /PerDay|per[_-]?day|daily/i.test(errBody);
+    // Only match explicit daily quota markers in Google's error format.
+    // Avoid matching the word "daily" in generic error messages.
+    return /"quotaType"\s*:\s*"PerDay"|perDay|RESOURCE_EXHAUSTED.*daily/i.test(errBody);
   },
 
   truncate(s, n) {
