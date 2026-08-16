@@ -477,3 +477,7 @@ const App = {
 
 /* Helper on App for i18n tool labels (defined in i18n.js as toolLabel map). */
 
+document.addEventListener('DOMContentLoaded', () => {
+  App.init();
+});
+
