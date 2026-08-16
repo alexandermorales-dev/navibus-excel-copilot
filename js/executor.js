@@ -7,13 +7,18 @@
 const Executor = {
   artifacts: [],  // { type, name, sheet } — created in current run
 
+  // Ops that are independent/decorative — if they fail, the earlier
+  // successful artifacts (sheets, tables, pivots, data) are still useful
+  // and should NOT be rolled back.
+  NON_ROLLBACK_OPS: new Set(['addSlicer', 'createChart']),
+
   clearArtifacts() {
     this.artifacts = [];
   },
 
   /**
    * Execute a validated action plan.
-   * Returns: { succeeded: [...], failed: [...], rolledBack: bool }
+   * Returns: { succeeded: [...], failed: [...], rolledBack: 'full' | 'partial' | false }
    */
   async execute(plan, onProgress) {
     this.clearArtifacts();
@@ -32,9 +37,15 @@ const Executor = {
         succeeded.push({ index: i, op: opDesc, action });
       } catch (e) {
         failed.push({ index: i, op: opDesc, action, error: e.message || String(e) });
-        // Rollback everything created so far in this run
+
+        if (this.NON_ROLLBACK_OPS.has(action.op)) {
+          // Independent/decorative op failed — keep prior artifacts, keep going.
+          continue;
+        }
+
+        // Foundational op failed — rollback everything created so far in this run.
         await this.rollback();
-        return { succeeded, failed, rolledBack: true };
+        return { succeeded, failed, rolledBack: 'full' };
       }
     }
 
@@ -49,7 +60,7 @@ const Executor = {
       }
     }
 
-    return { succeeded, failed, rolledBack: false };
+    return { succeeded, failed, rolledBack: failed.length > 0 ? 'partial' : false };
   },
 
   /**

@@ -418,6 +418,29 @@ body {
   background: var(--bg-hover);
 }
 
+.btn-retry {
+  margin-top: 8px;
+  padding: 6px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: #fff;
+  font-family: var(--font);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-retry:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.btn-retry:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* Utilities */
 .hidden {
   display: none !important;

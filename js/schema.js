@@ -4,6 +4,9 @@
    ============================================ */
 
 const Schema = {
+  // Number of sample data rows to include per sheet in the snapshot text.
+  SAMPLE_ROWS: 20,
+
   /**
    * Build a compact snapshot of the workbook for the LLM.
    * Returns a string description of the workbook structure.
@@ -81,10 +84,12 @@ const Schema = {
     let sampleRows = [];
     let columnTypes = [];
 
+    let columnStats = [];
+
     if (isHeader) {
       headers = firstRow.map(v => String(v));
-      // Sample up to 10 data rows so the LLM can see deeper data
-      const sampleCount = Math.min(10, rowCount - 1);
+      // Sample data rows so the LLM can see deeper data
+      const sampleCount = Math.min(this.SAMPLE_ROWS, rowCount - 1);
       for (let i = 1; i <= sampleCount; i++) {
         if (values[i]) {
           sampleRows.push(values[i].map(v => this.formatValue(v)));
@@ -92,9 +97,12 @@ const Schema = {
       }
       // Infer column types from formats + sample data
       columnTypes = this.inferColumnTypes(headers, values, safeFormats);
+      // Compute full-range numeric stats (not limited to the sample) so the
+      // LLM can answer aggregate questions (totals/averages) accurately.
+      columnStats = this.computeColumnStats(headers, values, columnTypes);
     } else {
-      // No clear header — show first 10 rows as data
-      const sampleCount = Math.min(10, rowCount);
+      // No clear header — show first N rows as data
+      const sampleCount = Math.min(this.SAMPLE_ROWS, rowCount);
       for (let i = 0; i < sampleCount; i++) {
         if (values[i]) {
           sampleRows.push(values[i].map(v => this.formatValue(v)));
@@ -110,9 +118,53 @@ const Schema = {
       hasHeaders: isHeader,
       headers: headers,
       columnTypes: columnTypes,
+      columnStats: columnStats,
       sampleRows: sampleRows,
-      address: usedRange.address
+      address: usedRange.address,
+      truncated: isHeader ? (rowCount - 1) > sampleRows.length : rowCount > sampleRows.length
     };
+  },
+
+  /**
+   * Compute min/max/sum/average/count for numeric-like columns using the
+   * FULL used range values (already loaded in memory), not just the sample.
+   * Returns an array parallel to headers; null entries for non-numeric cols.
+   */
+  computeColumnStats(headers, values, columnTypes) {
+    const stats = [];
+    for (let c = 0; c < headers.length; c++) {
+      const type = columnTypes[c];
+      if (type !== 'number' && type !== 'currency' && type !== 'percent') {
+        stats.push(null);
+        continue;
+      }
+      let sum = 0, count = 0, min = null, max = null;
+      for (let r = 1; r < values.length; r++) {
+        const v = values[r] ? values[r][c] : undefined;
+        if (typeof v === 'number' && !isNaN(v)) {
+          sum += v;
+          count++;
+          if (min === null || v < min) min = v;
+          if (max === null || v > max) max = v;
+        }
+      }
+      if (count === 0) {
+        stats.push(null);
+        continue;
+      }
+      stats.push({
+        sum: this.roundStat(sum),
+        avg: this.roundStat(sum / count),
+        min: this.roundStat(min),
+        max: this.roundStat(max),
+        count
+      });
+    }
+    return stats;
+  },
+
+  roundStat(n) {
+    return Math.round(n * 100) / 100;
   },
 
   looksLikeHeader(row) {
@@ -180,8 +232,16 @@ const Schema = {
         if (s.columnTypes.length > 0) {
           lines.push(`    Types: [${s.columnTypes.join(', ')}]`);
         }
+        if (Array.isArray(s.columnStats) && s.columnStats.some(st => st)) {
+          lines.push(`    Column stats (computed over ALL ${s.rows - 1} data rows, exact — safe to quote directly):`);
+          for (let c = 0; c < s.headers.length; c++) {
+            const st = s.columnStats[c];
+            if (!st) continue;
+            lines.push(`      "${s.headers[c]}": sum=${st.sum}, avg=${st.avg}, min=${st.min}, max=${st.max}, count=${st.count}`);
+          }
+        }
         if (s.sampleRows.length > 0) {
-          lines.push(`    Sample rows:`);
+          lines.push(`    Sample rows${s.truncated ? ` (showing ${s.sampleRows.length} of ${s.rows - 1} data rows — truncated)` : ''}:`);
           for (const row of s.sampleRows) {
             lines.push(`      [${row.join(' | ')}]`);
           }

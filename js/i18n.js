@@ -240,6 +240,18 @@ const I18n = {
       es: 'Error',
       en: 'Error'
     },
+    retryButton: {
+      es: 'Reintentar',
+      en: 'Retry'
+    },
+    retryingMessage: {
+      es: 'Reintentando...',
+      en: 'Retrying...'
+    },
+    repairAttempt: {
+      es: (n, total) => `Intento de reparación ${n}/${total}...`,
+      en: (n, total) => `Repair attempt ${n}/${total}...`
+    },
 
     // --- Gemini API status messages ---
     dailyQuota: {
@@ -255,8 +267,8 @@ const I18n = {
       en: (s) => `Server error ${s}`
     },
     timeout: {
-      es: 'Tiempo de espera agotado (120s)',
-      en: 'Request timed out (120s)'
+      es: 'Tiempo de espera agotado (180s)',
+      en: 'Request timed out (180s)'
     },
     networkError: {
       es: (s) => `Error de red: ${s}`,

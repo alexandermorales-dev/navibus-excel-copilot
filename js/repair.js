@@ -10,10 +10,13 @@ const Repair = {
    * @param {Array} conversation - Full conversation history
    * @param {Array} failed - Failed action objects with errors
    * @param {Object} schemaSnapshot - Current workbook snapshot
+   * @param {Array} originalPlan - The plan that was attempted
+   * @param {'full'|'partial'|false} rollbackType - Whether/how the run was rolled back
+   * @param {Array} succeeded - Actions that succeeded and were kept (partial rollback only)
    * @returns { ok: true, plan } | { ok: false, error }
    */
-  async repairActions(systemPrompt, conversation, failed, schemaSnapshot, originalPlan) {
-    const repairMessage = this.buildRepairMessage(failed, schemaSnapshot, originalPlan);
+  async repairActions(systemPrompt, conversation, failed, schemaSnapshot, originalPlan, rollbackType = 'full', succeeded = []) {
+    const repairMessage = this.buildRepairMessage(failed, schemaSnapshot, originalPlan, rollbackType, succeeded);
 
     const contents = [...conversation, {
       role: 'user',
@@ -41,7 +44,7 @@ const Repair = {
     return { ok: true, plan: parsed.plan, explanation: parsed.explanation };
   },
 
-  buildRepairMessage(failed, schemaSnapshot, originalPlan) {
+  buildRepairMessage(failed, schemaSnapshot, originalPlan, rollbackType = 'full', succeeded = []) {
     const lines = [
       'The previous action plan failed during execution. Here is the FULL original plan and the errors:',
       '',
@@ -60,12 +63,26 @@ const Repair = {
     }
 
     lines.push('');
-    lines.push('Current workbook state (after rollback — should be clean):');
+    lines.push('Current workbook state:');
     lines.push(Schema.toText(schemaSnapshot));
     lines.push('');
     lines.push('IMPORTANT INSTRUCTIONS FOR REPAIR:');
-    lines.push('1. Return a COMPLETE, CORRECTED action plan (not just the fixed action).');
-    lines.push('2. Start from scratch — the workbook was rolled back to its original state.');
+
+    if (rollbackType === 'full') {
+      lines.push('1. Return a COMPLETE, CORRECTED action plan (not just the fixed action).');
+      lines.push('2. The workbook was FULLY ROLLED BACK to its original state — nothing from the failed plan remains. Start from scratch.');
+    } else {
+      lines.push('1. The following actions ALREADY SUCCEEDED and were KEPT in the workbook (do NOT recreate them, do NOT return them again in your plan):');
+      if (succeeded.length > 0) {
+        for (const s of succeeded) {
+          lines.push(`   - ${s.op}: ${JSON.stringify(s.action)}`);
+        }
+      } else {
+        lines.push('   (none)');
+      }
+      lines.push('2. Return ONLY a corrected plan for the FAILED action(s) listed above (and any new actions strictly required to complete them, e.g. re-adding just a chart or slicer). Reference existing sheets/tables/pivots by name — do not use addSheet again for a sheet that already exists.');
+    }
+
     lines.push('3. Fix the specific errors above.');
     lines.push('4. Make sure writeRange values array dimensions match the range size.');
     lines.push('5. Make sure all sheet names and column references are correct.');

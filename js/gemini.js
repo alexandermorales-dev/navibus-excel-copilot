@@ -12,7 +12,7 @@ const Gemini = {
    * onThinking(text) is called live as thinking chunks arrive.
    * Returns: { ok: true, text, thinking } | { ok: false, error, retry }
    */
-  async generate(model, systemPrompt, contents, maxRetries = 3, onThinking) {
+  async generate(model, systemPrompt, contents, maxRetries = 4, onThinking) {
     const url = `${this.BASE_URL}/${model}:streamGenerateContent?alt=sse&key=${Config.apiKey}`;
     const body = {
       systemInstruction: { parts: [{ text: systemPrompt }] },
@@ -29,11 +29,12 @@ const Gemini = {
     };
 
     let lastError = '';
+    let lastErrorType = 'unknown';
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000);
+        const timeoutId = setTimeout(() => controller.abort(), 180000);
 
         const resp = await fetch(url, {
           method: 'POST',
@@ -58,42 +59,70 @@ const Gemini = {
             return {
               ok: false,
               error: I18n.t('dailyQuota'),
+              errorType: 'quota_daily',
               retry: false
             };
           }
 
-          const waitSec = delay > 0 ? Math.min(delay, 65) : 20 * (attempt + 1);
-          App.showStatus(I18n.tf('rateLimit', waitSec));
-          await this.sleep(waitSec * 1000);
-          App.hideStatus();
+          lastErrorType = 'rate_limit';
+          const waitSec = delay > 0 ? Math.min(delay, 65) : this.backoffSeconds(20, attempt);
+          lastError = I18n.tf('rateLimit', waitSec);
+          if (attempt < maxRetries - 1) {
+            App.showStatus(I18n.tf('rateLimit', waitSec));
+            await this.sleep(waitSec * 1000);
+            App.hideStatus();
+          }
           continue;
         }
 
         if (resp.status >= 500) {
           lastError = I18n.tf('serverError', resp.status);
-          await this.sleep(3000 * (attempt + 1));
+          lastErrorType = 'server';
+          if (attempt < maxRetries - 1) {
+            await this.sleep(this.backoffSeconds(3, attempt) * 1000);
+          }
           continue;
         }
 
-        // 4xx (non-429): fail fast
+        // 4xx (non-429): fail fast — not retryable
         const errText = await resp.text();
         return {
           ok: false,
           error: `HTTP ${resp.status}: ${this.truncate(errText, 300)}`,
+          errorType: 'client',
           retry: false
         };
 
       } catch (e) {
         if (e.name === 'AbortError') {
           lastError = I18n.t('timeout');
+          lastErrorType = 'timeout';
         } else {
           lastError = I18n.tf('networkError', e.message);
+          lastErrorType = 'network';
         }
-        await this.sleep(2000 * (attempt + 1));
+        if (attempt < maxRetries - 1) {
+          await this.sleep(this.backoffSeconds(2, attempt) * 1000);
+        }
       }
     }
 
-    return { ok: false, error: lastError || I18n.t('unknownError'), retry: false };
+    return {
+      ok: false,
+      error: lastError || I18n.t('unknownError'),
+      errorType: lastErrorType,
+      retry: false
+    };
+  },
+
+  /**
+   * Exponential backoff with jitter: base * 2^attempt, +/- 20% random jitter.
+   * Returns seconds.
+   */
+  backoffSeconds(base, attempt) {
+    const raw = base * Math.pow(2, attempt);
+    const jitter = raw * (0.8 + Math.random() * 0.4); // 80%-120% of raw
+    return Math.round(jitter);
   },
 
   /**
@@ -152,11 +181,11 @@ const Gemini = {
    * Try primary model, then fallback model if it fails with a non-quota error.
    */
   async generateWithFallback(systemPrompt, contents, onThinking) {
-    let result = await this.generate(Config.model, systemPrompt, contents, 3, onThinking);
+    let result = await this.generate(Config.model, systemPrompt, contents, 4, onThinking);
 
     if (!result.ok && result.retry !== false && Config.model !== Config.fallbackModel) {
       App.showStatus(I18n.t('fallbackModel'));
-      result = await this.generate(Config.fallbackModel, systemPrompt, contents, 1, onThinking);
+      result = await this.generate(Config.fallbackModel, systemPrompt, contents, 2, onThinking);
       App.hideStatus();
     }
 

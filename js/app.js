@@ -1,10 +1,11 @@
 /* ============================================
-   app.js â€” Main UI controller + agent loop
+   app.js — Main UI controller + agent loop
    ============================================ */
 
 const App = {
-  conversation: [],   // { role, parts: [{text}] } â€” Gemini format
+  conversation: [],   // { role, parts: [{text}] } — Gemini format
   isRunning: false,
+  lastUserText: '',   // last user message, for manual retry
 
   // DOM refs
   el: {},
@@ -109,6 +110,7 @@ const App = {
     this.isRunning = true;
     this.updateSendButton();
     this.el.messageInput.value = '';
+    this.lastUserText = text;
 
     // Show user message
     this.addMessage('user', text);
@@ -126,7 +128,31 @@ const App = {
       await this.runAgentLoop(text, typingEl);
     } catch (e) {
       this.removeElement(typingEl);
-      this.addMessage('system', `${I18n.t('genericError')}: ${e.message || String(e)}`);
+      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
+    }
+
+    this.isRunning = false;
+    this.updateSendButton();
+  },
+
+  /**
+   * Re-run the agent loop for the last user message, without re-adding it
+   * to the conversation (it's already there from the original attempt).
+   */
+  async retryLastMessage() {
+    if (this.isRunning || !this.lastUserText) return;
+
+    this.isRunning = true;
+    this.updateSendButton();
+
+    const typingEl = this.addTypingIndicator();
+    this.updateTypingText(typingEl, I18n.t('retryingMessage'));
+
+    try {
+      await this.runAgentLoop(this.lastUserText, typingEl);
+    } catch (e) {
+      this.removeElement(typingEl);
+      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
     this.isRunning = false;
@@ -141,7 +167,7 @@ const App = {
       schemaSnap = await Schema.snapshot();
     } catch (e) {
       this.removeElement(typingEl);
-      this.addMessage('system', `${I18n.t('workbookError')}: ${e.message}`);
+      this.addErrorMessageWithRetry(`${I18n.t('workbookError')}: ${e.message}`);
       return;
     }
 
@@ -168,7 +194,7 @@ const App = {
     this.finalizeLiveThinking(thinkingEl);
 
     if (!result.ok) {
-      this.addMessage('system', `${I18n.t('geminiError')}: ${result.error}`);
+      this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
       return;
     }
 
@@ -185,7 +211,8 @@ const App = {
     const validation = Actions.validatePlan(parsed.plan);
     if (!validation.valid) {
       this.addMessage('system', `${I18n.t('validationFailed')}:\n${validation.errors.join('\n')}`);
-      await this.attemptRepair(systemPrompt, validation.errors, schemaSnap);
+      const failedAsActions = validation.errors.map((err, i) => ({ index: i, op: 'validation', error: err }));
+      await this.attemptRepair(systemPrompt, failedAsActions, schemaSnap, parsed.plan, [], 'full');
       return;
     }
 
@@ -202,10 +229,10 @@ const App = {
     // 8. Show results
     this.showRunSummary(execResult);
 
-    if (execResult.failed.length > 0 && execResult.rolledBack) {
+    if (execResult.failed.length > 0) {
       this.addMessage('system', I18n.t('execFailed'));
-      await this.attemptRepair(systemPrompt, execResult.failed, schemaSnap, parsed.plan);
-    } else if (execResult.failed.length === 0) {
+      await this.attemptRepair(systemPrompt, execResult.failed, schemaSnap, parsed.plan, execResult.succeeded, execResult.rolledBack);
+    } else {
       // 9. Generate a final summary + suggestions message
       await this.generateSummaryAndSuggestions(parsed.plan, execResult, schemaSnap);
     }
@@ -244,27 +271,48 @@ const App = {
     }
   },
 
-  async attemptRepair(systemPrompt, failedActions, schemaSnap, originalPlan) {
-    const repairResult = await Repair.repairActions(
-      systemPrompt,
-      this.conversation,
-      failedActions,
-      schemaSnap,
-      originalPlan
-    );
+  async attemptRepair(systemPrompt, failedActions, schemaSnap, originalPlan, succeeded = [], rollbackType = 'full', maxAttempts = 2) {
+    let currentFailed = failedActions;
+    let currentPlan = originalPlan;
+    let currentSucceeded = succeeded;
+    let currentRollback = rollbackType;
 
-    if (!repairResult.ok) {
-      this.addMessage('system', `${I18n.t('repairFailed')}: ${repairResult.error}`);
-      return;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (maxAttempts > 1) {
+        this.addMessage('system', I18n.tf('repairAttempt', attempt, maxAttempts));
+      }
+
+      const repairResult = await Repair.repairActions(
+        systemPrompt,
+        this.conversation,
+        currentFailed,
+        schemaSnap,
+        currentPlan,
+        currentRollback,
+        currentSucceeded
+      );
+
+      if (!repairResult.ok) {
+        this.addErrorMessageWithRetry(`${I18n.t('repairFailed')}: ${repairResult.error}`);
+        return;
+      }
+
+      // Execute repaired plan
+      const execResult = await Executor.execute(repairResult.plan);
+      this.showRunSummary(execResult);
+
+      if (execResult.failed.length === 0) {
+        return; // repaired successfully
+      }
+
+      // Prepare for another repair round, if any attempts remain
+      currentFailed = execResult.failed;
+      currentPlan = repairResult.plan;
+      currentSucceeded = execResult.succeeded;
+      currentRollback = execResult.rolledBack;
     }
 
-    // Execute repaired plan
-    const execResult = await Executor.execute(repairResult.plan);
-    this.showRunSummary(execResult);
-
-    if (execResult.failed.length > 0) {
-      this.addMessage('system', I18n.t('repairAlsoFailed'));
-    }
+    this.addErrorMessageWithRetry(I18n.t('repairAlsoFailed'));
   },
 
   showRunSummary(result) {
@@ -363,11 +411,12 @@ const App = {
       title = I18n.t('summaryTitle');
       badgeText = I18n.t('summarySuccess');
       badgeClass = 'success';
-    } else if (result.rolledBack) {
+    } else if (result.rolledBack === 'full') {
       title = I18n.t('summaryRolledBackTitle');
       badgeText = I18n.t('summaryRolledBack');
       badgeClass = 'error';
     } else {
+      // 'partial' — some actions succeeded and were kept, only some failed
       title = I18n.t('summaryPartialTitle');
       badgeText = I18n.t('summaryPartial');
       badgeClass = 'partial';
@@ -396,6 +445,32 @@ const App = {
       <div class="message-avatar">${avatar}</div>
       <div class="message-content">${this.formatContent(content)}</div>
     `;
+    this.el.messageList.appendChild(msg);
+    this.scrollToBottom();
+    return msg;
+  },
+
+  /**
+   * Render a terminal error message with an inline "Retry" button that
+   * re-runs the last user message through the agent loop.
+   */
+  addErrorMessageWithRetry(text) {
+    const msg = document.createElement('div');
+    msg.className = 'message system';
+    msg.innerHTML = `
+      <div class="message-avatar">!</div>
+      <div class="message-content">
+        <p>${this.formatContent(this.escapeHtml(text))}</p>
+        <button type="button" class="btn-retry">${this.escapeHtml(I18n.t('retryButton'))}</button>
+      </div>
+    `;
+    const btn = msg.querySelector('.btn-retry');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        btn.disabled = true;
+        this.retryLastMessage();
+      });
+    }
     this.el.messageList.appendChild(msg);
     this.scrollToBottom();
     return msg;
@@ -599,22 +674,34 @@ ${schemaText}
 6. El sistema ahora soporta fórmulas en writeRange: cualquier string que empiece con "=" se escribirá como fórmula de Excel, no como texto literal. Aprovecha esto para vincular celdas.
 7. Si una hoja tiene más filas de las que ves en la muestra, recuerda que el rango usado (used range) se incluye en la descripción. Usa ese rango para construir referencias como =SUM(LC!E5:E50).
 
-## TU ROL: ASESOR PROACTIVO
+## TU ROL: MAESTRO DE EXCEL, NO SOLO UN CONSTRUCTOR
 
-Eres un asesor profesional, no solo un ejecutor de comandos. Analiza los datos del libro y actúa como un gerente financiero/técnico:
+Eres un maestro de Excel completo: analista de datos, profesor de Excel y asesor proactivo, además de constructor de paneles. Cada turno, decide en cuál de estos 3 MODOS debes responder:
 
+### MODO 1 — ANÁLISIS DEL LIBRO (texto plano)
+Úsalo cuando el usuario pregunte algo SOBRE los datos del libro actual: totales, promedios, tendencias, comparaciones, anomalías, "¿qué contiene la hoja X?", "¿por qué esta fórmula da error?", etc.
+- Usa los "Column stats" del snapshot (son EXACTOS, calculados sobre todas las filas) para responder preguntas de totales/promedios/min/max — NUNCA los calcules a mano desde las sample rows si ya existe la estadística exacta.
+- Si solo tienes sample rows (sin column stats) y la sección dice "truncated", ACLARA que tu respuesta se basa en una muestra parcial y podría no reflejar el 100% de los datos.
+- Señala proactivamente problemas de calidad de datos que notes en el snapshot (encabezados vacíos, tipos mixtos, valores atípicos evidentes).
+- Para explicar una fórmula existente, razona sobre su sintaxis y qué celdas referencia.
+
+### MODO 2 — CONOCIMIENTO GENERAL DE EXCEL (texto plano)
+Úsalo cuando el usuario pregunte algo de Excel que NO depende del libro abierto (ej: "¿cómo funciona XLOOKUP?", "¿cuál es la diferencia entre BUSCARV y BUSCARX?", "¿cómo hago una macro?"). Responde con tu conocimiento general de Excel, con ejemplos de fórmulas cuando ayude.
+
+### MODO 3 — PLAN DE ACCIONES (JSON)
+Úsalo cuando el usuario pida CREAR, GENERAR, MODIFICAR o CONSTRUIR algo en el libro (panel, informe, tabla, gráfico, KPI, formato, etc.). Responde con un ARRAY JSON de acciones (formato abajo). Antes de planes complejos, puedes hacer una pregunta aclaratoria breve en texto plano si falta información crítica.
+
+Reglas para decidir el modo:
+- Si hay AMBIGÜEDAD entre análisis y construcción (ej: "revisa mis ventas"), prefiere responder en texto (Modo 1) con un resumen y ofrece construir un panel como siguiente paso.
+- Nunca mezcles texto y JSON en la misma respuesta.
+- Mantén el contexto de la conversación: si ya construiste algo, un mensaje de seguimiento puede ser una pregunta de análisis (Modo 1) sobre lo creado, no necesariamente una nueva construcción.
+
+### COMO ASESOR PROACTIVO (aplica a los 3 modos)
 - Cuando veas los datos, IDENTIFICA patrones, tendencias y oportunidades de análisis.
 - Sugiere métricas relevantes según el tipo de datos (ej: totales, promedios, tendencias mensuales, comparativas).
 - Si el usuario pide algo genérico como "crea un dashboard", PROPÓN un diseño específico basado en los datos reales que ves.
-- Después de crear algo, SUGIERE 2-3 análisis adicionales o mejoras que podrían ser útiles.
+- Después de crear algo (Modo 3), SUGIERE 2-3 análisis adicionales o mejoras que podrían ser útiles.
 - Usa un tono profesional pero cercano, como un consultor experto.
-
-## CUÁNDO RESPONDER TEXTO vs JSON
-
-- Si el usuario saluda, hace una pregunta, o NO pide crear algo: responde con TEXTO PLANO en español. NO devuelvas JSON.
-- Si el usuario pide CREAR, GENERAR, HACER algo (panel, informe, tabla, gráfico, KPI, etc.): responde con un ARRAY JSON de acciones.
-- Antes de crear algo complejo, puedes hacer una pregunta aclaratoria breve en texto plano si es necesario.
-- Después de ejecutar un plan, la próxima respuesta del usuario puede incluir seguimiento — mantén contexto de lo que se creó.
 
 ## FORMATO DEL PLAN DE ACCIONES
 
@@ -724,22 +811,34 @@ ${schemaText}
 6. The system now supports formulas in writeRange: any string starting with "=" will be written as an Excel formula, not as literal text. Use this to link cells.
 7. If a sheet has more rows than you see in the sample, remember the used range is included in the description. Use that range to construct references like =SUM(LC!E5:E50).
 
-## YOUR ROLE: PROACTIVE ADVISOR
+## YOUR ROLE: FULL EXCEL MASTER, NOT JUST A BUILDER
 
-You are a professional advisor, not just a command executor. Analyze the workbook data and act as a financial/technical manager:
+You are a complete Excel master: data analyst, Excel tutor, and proactive advisor, in addition to a dashboard builder. Each turn, decide which of these 3 MODES to respond in:
 
+### MODE 1 — WORKBOOK ANALYSIS (plain text)
+Use this when the user asks something ABOUT the current workbook's data: totals, averages, trends, comparisons, anomalies, "what's in sheet X?", "why does this formula error out?", etc.
+- Use the "Column stats" from the snapshot (these are EXACT, computed over all rows) to answer total/average/min/max questions — NEVER hand-calculate these from the sample rows if the exact stat is already provided.
+- If you only have sample rows (no column stats) and the section says "truncated", CLARIFY that your answer is based on a partial sample and may not reflect 100% of the data.
+- Proactively flag data quality issues you notice in the snapshot (blank headers, mixed types, obvious outliers).
+- To explain an existing formula, reason about its syntax and which cells it references.
+
+### MODE 2 — GENERAL EXCEL KNOWLEDGE (plain text)
+Use this when the user asks an Excel question that does NOT depend on the open workbook (e.g., "how does XLOOKUP work?", "what's the difference between VLOOKUP and XLOOKUP?", "how do I write a macro?"). Answer using your general Excel knowledge, with formula examples when helpful.
+
+### MODE 3 — ACTION PLAN (JSON)
+Use this when the user asks you to CREATE, BUILD, MODIFY, or GENERATE something in the workbook (dashboard, report, table, chart, KPI, formatting, etc.). Respond with a JSON array of actions (format below). Before complex plans, you can ask a brief clarifying question in plain text if critical information is missing.
+
+Rules for choosing the mode:
+- If there is AMBIGUITY between analysis and building (e.g., "review my sales"), prefer responding in text (Mode 1) with a summary and offer to build a dashboard as a next step.
+- Never mix text and JSON in the same response.
+- Maintain conversation context: if you already built something, a follow-up message may be an analysis question (Mode 1) about what was created, not necessarily a new build request.
+
+### AS A PROACTIVE ADVISOR (applies to all 3 modes)
 - When you see the data, IDENTIFY patterns, trends, and analysis opportunities.
 - Suggest relevant metrics based on the data type (e.g., totals, averages, monthly trends, comparisons).
 - If the user asks for something generic like "create a dashboard", PROPOSE a specific design based on the actual data you see.
-- After creating something, SUGGEST 2-3 additional analyses or improvements that could be useful.
+- After creating something (Mode 3), SUGGEST 2-3 additional analyses or improvements that could be useful.
 - Use a professional but approachable tone, like an expert consultant.
-
-## WHEN TO RETURN TEXT vs JSON
-
-- If the user is making small talk, asking a question, or NOT requesting you to create something: respond with PLAIN TEXT. Do NOT return JSON.
-- If the user asks you to CREATE, BUILD, MAKE, GENERATE something (dashboard, report, table, chart, KPI, etc.): respond with a JSON array of actions.
-- Before creating something complex, you can ask a brief clarifying question in plain text if necessary.
-- After executing a plan, the user's next response may include follow-up — maintain context of what was created.
 
 ## ACTION PLAN FORMAT
 
