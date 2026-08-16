@@ -86,23 +86,11 @@ const Agent = {
         break;
       }
 
-      // Append the model turn (with functionCall parts + any text) to history.
-      // CRITICAL: preserve thought_signature on functionCall parts — Gemini
-      // requires it to be echoed back when thinking is enabled, or the next
-      // request returns HTTP 400 "missing thought_signature".
-      const modelParts = [];
-      if (result.text) modelParts.push({ text: result.text });
-      for (const fc of result.functionCalls) {
-        const fcPart = { functionCall: { name: fc.name, args: fc.args } };
-        if (fc.thought_signature) {
-          fcPart.functionCall.thought_signature = fc.thought_signature;
-        }
-        if (fc.thought) {
-          fcPart.thought = true;
-        }
-        modelParts.push(fcPart);
-      }
-      conversation.push({ role: 'model', parts: modelParts });
+      // Append the model turn to history using the RAW parts from the API
+      // response. This preserves thoughtSignature at the Part level, which
+      // Gemini 3 requires — reconstructing parts manually drops the signature
+      // and causes HTTP 400 on the next turn.
+      conversation.push({ role: 'model', parts: result.rawParts });
 
       // Dispatch each function call and collect responses.
       const responseParts = [];
@@ -129,19 +117,15 @@ const Agent = {
         }
 
         // Gemini expects functionResponse.name to match the call name, and
-        // response to be a JSON object. Echo thought_signature if present.
-        const respPart = {
+        // response to be a JSON object.
+        responseParts.push({
           functionResponse: {
             name: fc.name,
             response: toolResult.ok
               ? { ok: true, ...toolResult.result }
               : { ok: false, error: toolResult.error }
           }
-        };
-        if (fc.thought_signature) {
-          respPart.thought_signature = fc.thought_signature;
-        }
-        responseParts.push(respPart);
+        });
 
         if (consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
           // Tell the model to stop retrying this tool and explain.

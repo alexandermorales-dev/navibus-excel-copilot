@@ -201,11 +201,16 @@ const Gemini = {
 
   /**
    * Parse SSE stream from streamGenerateContent.
-   * Aggregates text, thinking, and functionCall parts. FunctionCall args
-   * may arrive split across multiple chunks (as partial JSON strings) — we
-   * buffer per-part and finalize on part boundary.
+   * Aggregates text, thinking, and functionCall parts.
    *
-   * Returns: { ok: true, text, thinking, functionCalls }
+   * CRITICAL: preserves thoughtSignature on parts — Gemini 3 requires it
+   * to be echoed back in conversation history on the next turn, or the
+   * API returns HTTP 400. The signature is at the Part level (alongside
+   * functionCall/text), NOT inside the functionCall object.
+   *
+   * Returns: { ok: true, text, thinking, functionCalls, rawParts }
+   *   rawParts = the original Part objects from the model response, to be
+   *   pushed into conversation history verbatim (preserving thoughtSignature).
    */
   async parseStream(resp, onThinking, onText) {
     const reader = resp.body.getReader();
@@ -214,9 +219,8 @@ const Gemini = {
     let fullText = '';
     let fullThinking = '';
 
-    // Function-call aggregation. Gemini typically emits a complete functionCall
-    // object in one chunk, but defensive: collect all functionCall parts found.
     const functionCalls = [];
+    const rawParts = []; // preserve original parts for conversation history
 
     while (true) {
       const { done, value } = await reader.read();
@@ -241,30 +245,23 @@ const Gemini = {
 
           for (const part of parts) {
             if (part.thought && part.text) {
+              // Thinking part — stream it live, but DON'T add to rawParts
+              // (thinking parts should not be echoed back in history).
               fullThinking += part.text;
               if (onThinking) onThinking(part.text, fullThinking);
             } else if (part.functionCall) {
-              // functionCall: { name, args, thought_signature? }
-              // Preserve thought_signature — Gemini requires it to be
-              // echoed back in the conversation history when thinking is
-              // enabled, or subsequent requests return HTTP 400.
-              const fc = {
+              // functionCall part — preserve the ENTIRE original part object
+              // so thoughtSignature (at the part level) is kept intact.
+              rawParts.push(part);
+              functionCalls.push({
                 name: part.functionCall.name,
                 args: part.functionCall.args || {}
-              };
-              if (part.functionCall.thought_signature) {
-                fc.thought_signature = part.functionCall.thought_signature;
-              }
-              if (part.thought_signature) {
-                fc.thought_signature = part.thought_signature;
-              }
-              if (part.thought) {
-                fc.thought = true;
-              }
-              functionCalls.push(fc);
+              });
             } else if (part.text) {
+              // Regular text part — accumulate and add to rawParts.
               fullText += part.text;
               if (onText) onText(part.text, fullText);
+              rawParts.push({ text: part.text });
             }
           }
         } catch (e) {
@@ -277,7 +274,8 @@ const Gemini = {
       ok: true,
       text: fullText,
       thinking: fullThinking.trim(),
-      functionCalls
+      functionCalls,
+      rawParts
     };
   },
 
