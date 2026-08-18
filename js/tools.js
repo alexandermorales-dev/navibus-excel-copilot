@@ -480,22 +480,36 @@ const Tools = {
       if (!Array.isArray(values) || !values.every(r => Array.isArray(r))) {
         return { ok: false, error: 'values must be a 2D array.' };
       }
+      if (values.length === 0 || !values[0] || values[0].length === 0) {
+        return { ok: false, error: 'values array is empty — nothing to write.' };
+      }
+
+      // Normalize ragged arrays: pad short rows with null so every row has
+      // the same column count. Office.js requires a rectangular matrix.
+      const maxCols = Math.max(...values.map(r => r.length));
+      const normalized = values.map(r => {
+        if (r.length === maxCols) return r;
+        const padded = r.slice();
+        while (padded.length < maxCols) padded.push(null);
+        return padded;
+      });
+
       const startCell = range.split(':')[0];
-      const valRows = values.length;
-      const valCols = values[0] ? values[0].length : 0;
+      const valRows = normalized.length;
+      const valCols = maxCols;
       const endCell = Tools.offsetRange(startCell, valRows - 1, valCols - 1);
       const fullRange = `${startCell}:${endCell}`;
 
       // Pre-image for undo.
       await Journal.recordRangePreImage(sheet, fullRange);
 
-      const hasFormulas = values.some(row => Array.isArray(row) && row.some(v => typeof v === 'string' && v.startsWith('=')));
+      const hasFormulas = normalized.some(row => Array.isArray(row) && row.some(v => typeof v === 'string' && v.startsWith('=')));
 
       const post = await Excel.run(async (ctx) => {
         const s = ctx.workbook.worksheets.getItem(sheet);
         const r = s.getRange(fullRange);
-        if (hasFormulas) r.formulas = values;
-        else r.values = values;
+        if (hasFormulas) r.formulas = normalized;
+        else r.values = normalized;
         if (numberFormat) r.numberFormat = numberFormat;
         // Read back a sample to surface formula errors.
         r.load('values, rowCount, columnCount');

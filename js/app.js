@@ -149,7 +149,8 @@ const App = {
         onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
         onToolStart: (callId, name, args) => this.addToolRow(activityEl, callId, name, args),
-        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult)
+        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult),
+        onToolError: (name, error) => this.showToolError(activityEl, name, error)
       });
 
       this.finalizeLiveThinking(activityEl);
@@ -194,7 +195,8 @@ const App = {
         onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
         onToolStart: (callId, name, args) => this.addToolRow(activityEl, callId, name, args),
-        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult)
+        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult),
+        onToolError: (name, error) => this.showToolError(activityEl, name, error)
       });
       this.finalizeLiveThinking(activityEl);
       this.finalizeLiveAnswer(activityEl);
@@ -321,6 +323,27 @@ const App = {
       errSpan.textContent = toolResult.error;
       row.appendChild(errSpan);
     }
+    this.scrollToBottom();
+  },
+
+  /**
+   * Show a prominent error banner when a tool fails, so the user is
+   * always aware that something went wrong — even if the model later
+   * self-corrects or omits the error from its final answer.
+   */
+  showToolError(activityEl, toolName, error) {
+    if (!activityEl) return;
+    const feed = activityEl.querySelector('.activity-feed');
+    if (!feed) return;
+    // Avoid duplicate banners for the same tool+error.
+    const existing = feed.querySelector('.tool-error-banner');
+    if (existing && existing.dataset.error === error) return;
+    const banner = document.createElement('div');
+    banner.className = 'tool-error-banner';
+    banner.dataset.error = error;
+    const label = I18n.toolLabel(toolName);
+    banner.innerHTML = `<span class="tool-error-icon">\u26A0</span><span><strong>${this.escapeHtml(label)}</strong>: ${this.escapeHtml(error)}</span>`;
+    feed.appendChild(banner);
     this.scrollToBottom();
   },
 

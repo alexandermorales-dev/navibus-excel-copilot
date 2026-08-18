@@ -26,6 +26,7 @@ const Agent = {
    * @param {function} opts.onText      — (chunk, full) live final text
    * @param {function} opts.onToolStart — (callId, name, args) before dispatch
    * @param {function} opts.onToolEnd   — (callId, name, result) after dispatch
+   * @param {function} opts.onToolError — (name, error) when a tool fails, for prominent UI notification
    * @param {function} opts.onRound     — (round, maxRounds) at start of each round
    *
    * Returns: { ok, finalText, rounds, toolCalls, sealed }
@@ -34,7 +35,7 @@ const Agent = {
   async run(opts) {
     const {
       userText, conversation, signal,
-      onThinking, onText, onToolStart, onToolEnd, onRound
+      onThinking, onText, onToolStart, onToolEnd, onToolError, onRound
     } = opts;
 
     Journal.beginRequest();
@@ -47,6 +48,7 @@ const Agent = {
     let lastErrorTool = null;
     let finalText = '';
     let aborted = false;
+    const toolErrors = []; // collect all tool errors to surface to the user
 
     // Auto-continue state: when the model hits MAX_TOKENS, the response is
     // truncated mid-sentence. We save the partial text, push it to history,
@@ -83,7 +85,8 @@ const Agent = {
           rounds: round - 1,
           toolCalls: toolCallCount,
           partial: toolCallCount > 0,
-          sealed
+          sealed,
+          toolErrors
         };
       }
 
@@ -144,6 +147,9 @@ const Agent = {
         if (!toolResult.ok) {
           if (lastErrorTool === fc.name) consecutiveErrors++;
           else { consecutiveErrors = 1; lastErrorTool = fc.name; }
+          // Collect error for surfacing to user, and fire prominent UI callback.
+          toolErrors.push({ tool: fc.name, error: toolResult.error });
+          if (onToolError) onToolError(fc.name, toolResult.error);
         } else {
           consecutiveErrors = 0;
           lastErrorTool = null;
@@ -195,7 +201,8 @@ const Agent = {
         rounds: this.MAX_ROUNDS,
         toolCalls: toolCallCount,
         sealed,
-        aborted: true
+        aborted: true,
+        toolErrors
       };
     }
 
@@ -206,6 +213,18 @@ const Agent = {
         : `I hit the limit of ${this.MAX_ROUNDS} tool rounds. ${toolCallCount} tool calls completed. You can ask me to continue or to verify the result.`;
     }
 
+    // If there were tool errors that the model didn't address in its final
+    // answer, append them so the user sees what went wrong.
+    if (toolErrors.length > 0 && finalText) {
+      const errorSummary = toolErrors.map(e => `${e.tool}: ${e.error}`).join('; ');
+      const hasErrorMention = finalText.toLowerCase().includes('error') || finalText.toLowerCase().includes('no se pudo') || finalText.toLowerCase().includes('could not') || finalText.toLowerCase().includes('failed');
+      if (!hasErrorMention) {
+        finalText += I18n.lang === 'es'
+          ? `\n\n⚠ Errores de herramientas: ${errorSummary}`
+          : `\n\n⚠ Tool errors: ${errorSummary}`;
+      }
+    }
+
     // Append the final text answer to conversation history as a model turn.
     conversation.push({ role: 'model', parts: [{ text: finalText }] });
 
@@ -214,7 +233,8 @@ const Agent = {
       finalText,
       rounds: this.MAX_ROUNDS,
       toolCalls: toolCallCount,
-      sealed
+      sealed,
+      toolErrors
     };
   },
 

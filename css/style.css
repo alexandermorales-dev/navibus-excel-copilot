@@ -741,6 +741,34 @@ body {
   word-break: break-word;
 }
 
+/* Prominent error banner shown when a tool fails */
+.tool-error-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: rgba(244, 67, 54, 0.12);
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-top: 4px;
+  animation: fadeIn 0.2s ease;
+}
+
+.tool-error-banner .tool-error-icon {
+  flex-shrink: 0;
+  color: var(--error);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.tool-error-banner strong {
+  color: var(--error);
+  font-weight: 600;
+}
+
 /* Live answer (streamed final text inside the activity container) */
 .live-answer {
   margin-top: 6px;
