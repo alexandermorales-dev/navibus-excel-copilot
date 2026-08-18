@@ -408,11 +408,11 @@ const Tools = {
     async get_objects({ sheet }) {
       const result = await Excel.run(async (ctx) => {
         const out = { tables: [], pivots: [], charts: [], slicers: [], names: [] };
-        const wantSheet = sheet ? sheet.toLowerCase() : null;
+        const wantSheet = sheet ? String(sheet).toLowerCase() : null;
 
         // Workbook-scoped collections — load all properties in one batch.
         const tables = ctx.workbook.tables;
-        tables.load('items/name, items/worksheet, items/range/address');
+        tables.load('items/name, items/worksheet/name, items/range/address');
         const pivots = ctx.workbook.pivotTables;
         pivots.load('items/name, items/worksheet/name, items/layout/range');
         const slicers = ctx.workbook.slicers;
@@ -422,21 +422,22 @@ const Tools = {
         await ctx.sync();
 
         for (const t of tables.items) {
-          const tSheet = (t.worksheet || '').toLowerCase();
-          if (wantSheet && tSheet !== wantSheet) continue;
-          out.tables.push({ name: t.name, sheet: t.worksheet, range: t.range.address });
+          let tSheet = '';
+          try { tSheet = t.worksheet.name || ''; } catch (e) {}
+          if (wantSheet && tSheet.toLowerCase() !== wantSheet) continue;
+          out.tables.push({ name: t.name, sheet: tSheet, range: t.range.address });
         }
         for (const p of pivots.items) {
           let pSheet = '';
           let pRange = '';
-          try { pSheet = p.worksheet.name; } catch (e) {}
+          try { pSheet = p.worksheet.name || ''; } catch (e) {}
           try { pRange = p.layout.range || ''; } catch (e) {}
           if (wantSheet && pSheet.toLowerCase() !== wantSheet) continue;
           out.pivots.push({ name: p.name, sheet: pSheet, range: pRange });
         }
         for (const sl of slicers.items) {
           let slSheet = '';
-          try { slSheet = sl.worksheet.name; } catch (e) {}
+          try { slSheet = sl.worksheet.name || ''; } catch (e) {}
           if (wantSheet && slSheet.toLowerCase() !== wantSheet) continue;
           out.slicers.push({ name: sl.name, sheet: slSheet, caption: sl.caption });
         }
