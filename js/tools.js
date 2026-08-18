@@ -22,7 +22,7 @@ const Tools = {
         // --- READ ---
         {
           name: 'get_workbook_overview',
-          description: 'Return a compact overview of every visible worksheet: name, used-range address, row/column counts, headers, column types, and numeric column stats (sum/avg/min/max/count). Call this first when you need to understand the workbook.'
+          description: 'Return a compact overview of every visible worksheet: name, used-range address, row/column counts, headers, column types, and numeric column stats (sum/avg/min/max/count). Call this first to understand the workbook STRUCTURE (sheet names, headers, column types). The stats are GLOBAL aggregates over ALL rows — do NOT use them to answer questions about specific or filtered data; use read_range() on the exact range instead.'
         },
         {
           name: 'read_range',

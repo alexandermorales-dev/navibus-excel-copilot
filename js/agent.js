@@ -13,6 +13,7 @@
 const Agent = {
   MAX_ROUNDS: 20,           // hard cap on tool-call rounds per request
   MAX_CONSECUTIVE_ERRORS: 3,// bail if the same tool keeps failing
+  MAX_CONTINUATIONS: 3,     // auto-continue attempts when MAX_TOKENS truncates a response
 
   /**
    * Run the agent loop for one user message.
@@ -47,6 +48,12 @@ const Agent = {
     let finalText = '';
     let aborted = false;
 
+    // Auto-continue state: when the model hits MAX_TOKENS, the response is
+    // truncated mid-sentence. We save the partial text, push it to history,
+    // and ask the model to continue — concatenating the pieces seamlessly.
+    let continuationBase = '';
+    let continuationsUsed = 0;
+
     for (let round = 1; round <= this.MAX_ROUNDS; round++) {
       if (signal && signal.aborted) { aborted = true; break; }
       if (onRound) onRound(round, this.MAX_ROUNDS);
@@ -58,8 +65,10 @@ const Agent = {
         toolConfig: { functionCallingConfig: { mode: 'AUTO' } },
         onThinking,
         onText: (chunk, full) => {
-          finalText = full;
-          if (onText) onText(chunk, full);
+          // Prepend any text from previous truncated segments so the UI
+          // shows the complete answer as it streams in.
+          finalText = continuationBase + full;
+          if (onText) onText(chunk, finalText);
         },
         signal
       });
@@ -78,13 +87,37 @@ const Agent = {
         };
       }
 
-      // No function calls and no text → model ended empty-handed.
+      // No function calls → the model is done (or was truncated).
       if (result.functionCalls.length === 0) {
-        finalText = result.text || (I18n.lang === 'es'
-          ? 'Listo.'
-          : 'Done.');
+        // MAX_TOKENS: the response was cut off mid-generation. Auto-continue
+        // by asking the model to resume from where it stopped, up to a cap.
+        if (result.finishReason === 'MAX_TOKENS' && continuationsUsed < this.MAX_CONTINUATIONS && result.text) {
+          continuationBase = finalText; // save accumulated text so far
+          conversation.push({ role: 'model', parts: result.rawParts });
+          conversation.push({ role: 'user', parts: [{ text: I18n.lang === 'es'
+            ? 'Continúa tu respuesta anterior exactamente desde donde se detuvo. No repitas lo que ya dijiste.'
+            : 'Continue your previous response exactly from where it stopped. Do not repeat what you already said.'
+          }] });
+          continuationsUsed++;
+          continue; // next round calls generateWithFallback again
+        }
+
+        // If this followed a continuation, finalText was already set by the
+        // onText callback to continuationBase + full — don't overwrite it
+        // with just result.text (the continuation piece alone).
+        if (!continuationBase) {
+          finalText = result.text || (I18n.lang === 'es'
+            ? 'Listo.'
+            : 'Done.');
+        }
+        // If continuationBase is set but result.text is empty, finalText
+        // already holds the partial text from the onText callback.
         break;
       }
+
+      // The model returned function calls — we're in tool-calling mode, so
+      // reset the continuation base (any partial text is already in history).
+      continuationBase = '';
 
       // Append the model turn to history using the RAW parts from the API
       // response. This preserves thoughtSignature at the Part level, which

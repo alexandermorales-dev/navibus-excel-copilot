@@ -5,7 +5,7 @@
 
 const Schema = {
   // Number of sample data rows to include per sheet in the snapshot text.
-  SAMPLE_ROWS: 20,
+  SAMPLE_ROWS: 10,
   // Max cells to load in a single Office.js range call. Sheets exceeding this
   // are read via bounded sub-ranges to avoid payload limits and slow loads.
   CELL_CAP: 200000,

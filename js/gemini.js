@@ -45,7 +45,7 @@ const Gemini = {
       contents: contents,
       generationConfig: {
         temperature: 0.4,
-        maxOutputTokens: 8192,
+        maxOutputTokens: 24576,
         thinkingConfig: {
           includeThoughts: true,
           thinkingLevel: 'medium'
@@ -58,9 +58,17 @@ const Gemini = {
     let lastError = '';
     let lastErrorType = 'unknown';
 
-    // Ensure we try every key in the pool at least once before giving up.
-    const pool = Config.keyPool();
-    const effectiveMaxRetries = Math.max(maxRetries, pool.length + 2);
+    // Key selection strategy:
+    //   1. If the user has their own API key, try it FIRST on every request.
+    //   2. On 429 from the user's key → mark it exhausted for this request,
+    //      fall back to round-robin among the HARDCODED keys only.
+    //   3. On 400/403 from the user's key (invalid/disabled) → auto-clear it
+    //      from Settings + localStorage, notify once, then use hardcoded keys.
+    //   4. Hardcoded keys round-robin among themselves on 429s.
+    const userKey = (Config.apiKey && Config.apiKey.length > 0) ? Config.apiKey : '';
+    let userKeyExhausted = false; // 429'd during this request — skip for rest of request
+    const hardcodedPool = Config.hardcodedKeys.filter(k => k);
+    const effectiveMaxRetries = Math.max(maxRetries, hardcodedPool.length + (userKey ? 3 : 2));
 
     for (let attempt = 0; attempt < effectiveMaxRetries; attempt++) {
       // Honor an external abort (user clicked Stop) between retries too.
@@ -68,8 +76,16 @@ const Gemini = {
         return { ok: false, error: I18n.t('aborted'), errorType: 'aborted', retry: false };
       }
 
-      // Pick the next key from the round-robin pool for each attempt.
-      const apiKey = Config.nextKey();
+      // Pick the key: user's key first (if available and not exhausted this
+      // request), otherwise round-robin among the hardcoded keys.
+      let apiKey = '';
+      let isUserKey = false;
+      if (userKey && !userKeyExhausted) {
+        apiKey = userKey;
+        isUserKey = true;
+      } else {
+        apiKey = Config.nextHardcodedKey();
+      }
       if (!apiKey) {
         return { ok: false, error: 'No API key available.', errorType: 'client', retry: false };
       }
@@ -101,11 +117,18 @@ const Gemini = {
           const delay = this.parseRetryDelay(errBody);
           const isDaily = this.isDailyQuota(errBody);
 
-          console.log(`429: key ${attempt % pool.length}/${pool.length}, daily=${isDaily}, delay=${delay}s, body=${this.truncate(errBody, 200)}`);
+          console.log(`429: ${isUserKey ? 'user key' : 'hardcoded key'}, daily=${isDaily}, delay=${delay}s, body=${this.truncate(errBody, 200)}`);
+
+          if (isUserKey) {
+            // User's key hit rate limit — don't try it again this request;
+            // fall back to the hardcoded pool immediately.
+            userKeyExhausted = true;
+            continue;
+          }
 
           if (attempt < effectiveMaxRetries - 1) {
-            if (pool.length > 1) {
-              // More keys to try — rotate immediately without waiting.
+            if (hardcodedPool.length > 1) {
+              // More hardcoded keys to try — rotate immediately without waiting.
               continue;
             }
             // Only one key — must wait for the rate limit to clear.
@@ -129,6 +152,29 @@ const Gemini = {
           };
         }
 
+        // 400/403: invalid or disabled key.
+        if (resp.status === 400 || resp.status === 403) {
+          const errText = await resp.text();
+          if (isUserKey) {
+            // User's key is invalid/disabled — clear it, notify, fall back.
+            console.log(`${resp.status} on user key — clearing and falling back to hardcoded keys. body=${this.truncate(errText, 200)}`);
+            Config.clearUserKey();
+            userKeyExhausted = true; // prevents re-reading the now-empty Config.apiKey
+            App.showStatus(I18n.lang === 'es'
+              ? 'Tu API key es inválida — se eliminó de Configuración. Usando claves integradas.'
+              : 'Your API key is invalid — cleared from Settings. Using built-in keys.');
+            setTimeout(() => App.hideStatus(), 5000);
+            continue;
+          }
+          // Hardcoded key 400/403 — fail fast (bad request or disabled key).
+          return {
+            ok: false,
+            error: `HTTP ${resp.status}: ${this.truncate(errText, 300)}`,
+            errorType: 'client',
+            retry: false
+          };
+        }
+
         if (resp.status >= 500) {
           lastError = I18n.tf('serverError', resp.status);
           lastErrorType = 'server';
@@ -138,7 +184,7 @@ const Gemini = {
           continue;
         }
 
-        // 4xx (non-429): fail fast — not retryable
+        // Other 4xx: fail fast — not retryable
         const errText = await resp.text();
         return {
           ok: false,
@@ -205,9 +251,11 @@ const Gemini = {
    * API returns HTTP 400. The signature is at the Part level (alongside
    * functionCall/text), NOT inside the functionCall object.
    *
-   * Returns: { ok: true, text, thinking, functionCalls, rawParts }
+   * Returns: { ok: true, text, thinking, functionCalls, rawParts, finishReason }
    *   rawParts = the original Part objects from the model response, to be
    *   pushed into conversation history verbatim (preserving thoughtSignature).
+   *   finishReason = the model's stop reason (e.g. 'STOP', 'MAX_TOKENS').
+   *   Used by the agent to detect truncated responses and auto-continue.
    */
   async parseStream(resp, onThinking, onText) {
     const reader = resp.body.getReader();
@@ -215,6 +263,7 @@ const Gemini = {
     let buffer = '';
     let fullText = '';
     let fullThinking = '';
+    let finishReason = null;
 
     const functionCalls = [];
     const rawParts = []; // preserve original parts for conversation history
@@ -238,7 +287,14 @@ const Gemini = {
 
         try {
           const chunk = JSON.parse(jsonStr);
-          const parts = chunk.candidates?.[0]?.content?.parts || [];
+          const candidate = chunk.candidates?.[0];
+          // Capture finishReason — the last chunk carries it. 'MAX_TOKENS'
+          // means the response was truncated; the agent uses this to
+          // auto-continue instead of treating partial text as final.
+          if (candidate?.finishReason) {
+            finishReason = candidate.finishReason;
+          }
+          const parts = candidate?.content?.parts || [];
 
           for (const part of parts) {
             if (part.thought && part.text) {
@@ -272,7 +328,8 @@ const Gemini = {
       text: fullText,
       thinking: fullThinking.trim(),
       functionCalls,
-      rawParts
+      rawParts,
+      finishReason
     };
   },
 

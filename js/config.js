@@ -13,7 +13,7 @@ const Config = {
   // pool so it's tried first, then we cycle through these.
   // Stored base64-encoded to avoid plaintext exposure in the repo.
   _encodedKeys: [
-    'QVEuQWI4Uk42SU8yWTdSYU83a3l4VDVxWkM0ZkppWVZqQzhSekZFUDJDUGl0Y21wNG81Wmc=',
+    'QVEuQWI4Uk42SkNJOUZJZU9IQ2ZYZ2FCTGlmbnlrOHBPNHhjcWJnOHlHOUxJOTItRl9BdUE=',
     'QVEuQWI4Uk42STVZZmJRbzZDY19fUll1T05hb2FiOHctWjFOOUttQnVLQnotSEQ2cmJzc1E='
   ],
 
@@ -91,6 +91,32 @@ const Config = {
     const key = pool[this._keyIndex % pool.length];
     this._keyIndex = (this._keyIndex + 1) % pool.length;
     return key;
+  },
+
+  /**
+   * Get the next HARDCODED key only (round-robin), skipping the user's key.
+   * Used after the user's own key has been exhausted (429) or invalidated
+   * (400/403) during a request, so we fall back to the built-in pool.
+   * @returns {string}
+   */
+  nextHardcodedKey() {
+    const pool = this.hardcodedKeys.filter(k => k);
+    if (pool.length === 0) return '';
+    const key = pool[this._keyIndex % pool.length];
+    this._keyIndex = (this._keyIndex + 1) % pool.length;
+    return key;
+  },
+
+  /**
+   * Clear the user's API key from memory, localStorage, and the Settings UI.
+   * Called when the user's key returns 400/403 (invalid/disabled).
+   */
+  clearUserKey() {
+    this.apiKey = '';
+    try { localStorage.removeItem('gemini_api_key'); } catch (e) {}
+    if (typeof App !== 'undefined' && App.el && App.el.apiKeyInput) {
+      App.el.apiKeyInput.value = '';
+    }
   },
 
   /**
