@@ -144,6 +144,36 @@ body {
   border-color: var(--accent);
 }
 
+/* API key input with visibility toggle */
+.api-key-wrapper {
+  position: relative;
+}
+
+.api-key-wrapper input {
+  padding-right: 36px;
+}
+
+.api-key-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  transition: color 0.15s;
+}
+
+.api-key-toggle:hover {
+  color: var(--text-primary);
+}
+
 .settings-hint {
   font-size: 11px;
   color: var(--text-muted);

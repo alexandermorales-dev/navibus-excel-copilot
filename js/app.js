@@ -22,6 +22,7 @@ const App = {
       settingsBtn: document.getElementById('settingsBtn'),
       settingsPanel: document.getElementById('settingsPanel'),
       apiKeyInput: document.getElementById('apiKeyInput'),
+      apiKeyToggle: document.getElementById('apiKeyToggle'),
       modelSelect: document.getElementById('modelSelect'),
       clearChatBtn: document.getElementById('clearChatBtn'),
       statusBar: document.getElementById('statusBar')
@@ -51,6 +52,21 @@ const App = {
       Config.apiKey = this.el.apiKeyInput.value.trim();
       Config.save();
       this.updateSendButton();
+    });
+
+    this.el.apiKeyToggle.addEventListener('click', () => {
+      const input = this.el.apiKeyInput;
+      const eyeIcon = this.el.apiKeyToggle.querySelector('.icon-eye');
+      const eyeOffIcon = this.el.apiKeyToggle.querySelector('.icon-eye-off');
+      if (input.type === 'password') {
+        input.type = 'text';
+        eyeIcon.classList.add('hidden');
+        eyeOffIcon.classList.remove('hidden');
+      } else {
+        input.type = 'password';
+        eyeIcon.classList.remove('hidden');
+        eyeOffIcon.classList.add('hidden');
+      }
     });
 
     this.el.modelSelect.addEventListener('change', () => {
