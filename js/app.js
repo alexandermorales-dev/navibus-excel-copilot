@@ -132,6 +132,7 @@ const App = {
     this.updateStopButton();
     this.el.messageInput.value = '';
     this.lastUserText = text;
+    this._hasWrittenThisRun = false;
 
     this.addMessage('user', text);
     this.conversation.push({ role: 'user', parts: [{ text }] });
@@ -148,27 +149,38 @@ const App = {
         signal: this.abortController.signal,
         onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
-        onToolStart: (callId, name, args) => this.addToolRow(activityEl, callId, name, args),
+        onToolStart: (callId, name, args) => {
+          this.addToolRow(activityEl, callId, name, args);
+          if (this.isWriteTool(name)) this._hasWrittenThisRun = true;
+          this.updateRunStatus(activityEl, this.toolPhase(name), this.toolPhaseDetail(name, args));
+        },
         onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult),
-        onToolError: (name, error) => this.showToolError(activityEl, name, error)
+        onToolError: (name, error) => this.showToolError(activityEl, name, error),
+        onRound: (round, maxRounds) => {
+          if (round > 1) this.updateRunStatus(activityEl, 'thinking');
+        }
       });
 
       this.finalizeLiveThinking(activityEl);
       this.finalizeLiveAnswer(activityEl);
 
       if (!result.ok) {
+        this.updateRunStatus(activityEl, 'error');
         this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
       } else {
+        this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
         // Render the final answer as a proper message (with undo if sealed).
         this.addFinalMessage(result.finalText, result.sealed, result.aborted);
       }
     } catch (e) {
       this.finalizeLiveThinking(activityEl);
+      this.updateRunStatus(activityEl, 'error');
       this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
     this.abortController = null;
     this.isRunning = false;
+    this._hasWrittenThisRun = false;
     this.updateSendButton();
     this.updateStopButton();
   },
@@ -180,6 +192,7 @@ const App = {
   async retryLastMessage() {
     if (this.isRunning || !this.lastUserText) return;
     this.isRunning = true;
+    this._hasWrittenThisRun = false;
     this.updateSendButton();
     this.updateStopButton();
     this.abortController = new AbortController();
@@ -194,19 +207,29 @@ const App = {
         signal: this.abortController.signal,
         onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
-        onToolStart: (callId, name, args) => this.addToolRow(activityEl, callId, name, args),
+        onToolStart: (callId, name, args) => {
+          this.addToolRow(activityEl, callId, name, args);
+          if (this.isWriteTool(name)) this._hasWrittenThisRun = true;
+          this.updateRunStatus(activityEl, this.toolPhase(name), this.toolPhaseDetail(name, args));
+        },
         onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult),
-        onToolError: (name, error) => this.showToolError(activityEl, name, error)
+        onToolError: (name, error) => this.showToolError(activityEl, name, error),
+        onRound: (round, maxRounds) => {
+          if (round > 1) this.updateRunStatus(activityEl, 'thinking');
+        }
       });
       this.finalizeLiveThinking(activityEl);
       this.finalizeLiveAnswer(activityEl);
       if (!result.ok) {
+        this.updateRunStatus(activityEl, 'error');
         this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
       } else {
+        this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
         this.addFinalMessage(result.finalText, result.sealed, result.aborted);
       }
     } catch (e) {
       this.finalizeLiveThinking(activityEl);
+      this.updateRunStatus(activityEl, 'error');
       this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
@@ -225,6 +248,11 @@ const App = {
     msg.innerHTML = `
       <div class="message-avatar">AI</div>
       <div class="message-content">
+        <div class="run-status run-status-active">
+          <span class="run-status-spinner"></span>
+          <span class="run-status-text">${this.escapeHtml(I18n.t('statusThinking'))}</span>
+          <span class="run-status-count"></span>
+        </div>
         <div class="thinking-block thinking-live">
           <div class="thinking-header">
             <span class="thinking-icon">\u{1F4AD}</span>
@@ -240,6 +268,34 @@ const App = {
     this.el.messageList.appendChild(msg);
     this.scrollToBottom();
     return msg;
+  },
+
+  /**
+   * Update the run status header to reflect the current phase.
+   * Phases: thinking → reading → writing → verifying → done/error/stopped
+   */
+  updateRunStatus(activityEl, phase, detail) {
+    if (!activityEl) return;
+    const statusEl = activityEl.querySelector('.run-status');
+    const textEl = activityEl.querySelector('.run-status-text');
+    const countEl = activityEl.querySelector('.run-status-count');
+    if (!statusEl || !textEl) return;
+
+    statusEl.classList.remove('run-status-active', 'run-status-done', 'run-status-error', 'run-status-stopped');
+
+    let label = '';
+    switch (phase) {
+      case 'thinking':  label = I18n.t('statusThinking');  statusEl.classList.add('run-status-active'); break;
+      case 'reading':   label = I18n.t('statusReading');   statusEl.classList.add('run-status-active'); break;
+      case 'writing':   label = I18n.t('statusWriting');   statusEl.classList.add('run-status-active'); break;
+      case 'verifying': label = I18n.t('statusVerifying'); statusEl.classList.add('run-status-active'); break;
+      case 'done':      label = I18n.t('statusDone');      statusEl.classList.add('run-status-done'); break;
+      case 'error':     label = I18n.t('statusError');     statusEl.classList.add('run-status-error'); break;
+      case 'stopped':   label = I18n.t('statusStopped');   statusEl.classList.add('run-status-stopped'); break;
+      default: label = phase;
+    }
+    textEl.textContent = label;
+    if (countEl) countEl.textContent = detail || '';
   },
 
   updateLiveThinking(activityEl, fullText) {
@@ -370,6 +426,44 @@ const App = {
       case 'delete_rows_cols': return `${a.sheet || ''} ${a.kind || ''} @${a.at || ''}`;
       case 'sort_range': return `${a.sheet || ''}!${a.range || ''}`;
       default: return '';
+    }
+  },
+
+  /**
+   * Map a tool name to a high-level phase for the status indicator.
+   * Reading tools → 'reading', writing/creating tools → 'writing',
+   * read_range after writes → 'verifying' (heuristic: any read_range
+   * that follows a write in the same run is treated as verification).
+   */
+  toolPhase(name) {
+    const READ_TOOLS = ['get_workbook_overview', 'read_range', 'find_in_workbook', 'get_objects'];
+    const WRITE_TOOLS = ['write_range', 'format_range', 'clear_range', 'add_sheet', 'delete_sheet',
+                         'create_table', 'create_pivot', 'create_chart', 'add_slicer',
+                         'conditional_format', 'autofit', 'insert_rows_cols', 'delete_rows_cols', 'sort_range'];
+    if (WRITE_TOOLS.includes(name)) return 'writing';
+    if (READ_TOOLS.includes(name)) return this._hasWrittenThisRun ? 'verifying' : 'reading';
+    return 'thinking';
+  },
+
+  isWriteTool(name) {
+    const WRITE_TOOLS = ['write_range', 'format_range', 'clear_range', 'add_sheet', 'delete_sheet',
+                         'create_table', 'create_pivot', 'create_chart', 'add_slicer',
+                         'conditional_format', 'autofit', 'insert_rows_cols', 'delete_rows_cols', 'sort_range'];
+    return WRITE_TOOLS.includes(name);
+  },
+
+  toolPhaseDetail(name, args) {
+    const a = args || {};
+    switch (name) {
+      case 'get_workbook_overview': return '';
+      case 'read_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'write_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'format_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'add_sheet': return a.name || '';
+      case 'create_chart': return a.title || a.type || '';
+      case 'create_pivot': return a.name || '';
+      case 'create_table': return a.name || '';
+      default: return this.toolDetail(name, args);
     }
   },
 

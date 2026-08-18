@@ -651,6 +651,98 @@ body {
 }
 
 /* ============================================
+   Run status header (phase indicator: thinking/reading/writing/done)
+   ============================================ */
+
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 500;
+  margin-bottom: 8px;
+  transition: all 0.2s ease;
+}
+
+.run-status-active {
+  background: rgba(0, 168, 204, 0.1);
+  border: 1px solid rgba(0, 168, 204, 0.25);
+  color: var(--accent);
+}
+
+.run-status-done {
+  background: rgba(76, 175, 80, 0.12);
+  border: 1px solid rgba(76, 175, 80, 0.3);
+  color: var(--success);
+}
+
+.run-status-error {
+  background: rgba(244, 67, 54, 0.12);
+  border: 1px solid rgba(244, 67, 54, 0.3);
+  color: var(--error);
+}
+
+.run-status-stopped {
+  background: rgba(255, 152, 0, 0.12);
+  border: 1px solid rgba(255, 152, 0, 0.3);
+  color: var(--warning);
+}
+
+.run-status-spinner {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(0, 168, 204, 0.3);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.run-status-done .run-status-spinner,
+.run-status-error .run-status-spinner,
+.run-status-stopped .run-status-spinner {
+  display: none;
+}
+
+.run-status-done::before,
+.run-status-error::before,
+.run-status-stopped::before {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.run-status-done::before { content: '\2713'; }
+.run-status-error::before { content: '\2717'; }
+.run-status-stopped::before { content: '\25A0'; }
+
+.run-status-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-status-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.run-status-active .run-status-count {
+  color: rgba(0, 168, 204, 0.6);
+}
+
+/* ============================================
    Agentic UI: activity feed, tool rows, stop/undo, markdown
    ============================================ */
 

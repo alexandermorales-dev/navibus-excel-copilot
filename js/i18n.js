@@ -60,6 +60,14 @@ const I18n = {
     reasoning: { es: 'Razonando...',      en: 'Reasoning...' },
     reasoningDone: { es: 'Razonamiento del modelo', en: 'Model reasoning' },
     retryingMessage: { es: 'Reintentando...', en: 'Retrying...' },
+    // --- Run status header (phase indicator) ---
+    statusThinking:  { es: 'Pensando...',           en: 'Thinking...' },
+    statusReading:   { es: 'Leyendo datos...',      en: 'Reading data...' },
+    statusWriting:   { es: 'Escribiendo en Excel...', en: 'Writing to Excel...' },
+    statusVerifying: { es: 'Verificando...',        en: 'Verifying...' },
+    statusDone:      { es: 'Completado',            en: 'Completed' },
+    statusError:     { es: 'Error',                 en: 'Error' },
+    statusStopped:   { es: 'Detenido',              en: 'Stopped' },
 
     // --- Stop / Undo ---
     stop:    { es: 'Detener',   en: 'Stop' },
