@@ -224,8 +224,10 @@ const Agent = {
    * arrays are replaced with a summary string.
    */
   trimHistory(conversation) {
-    const TURNS_KEPT_FULL = 6;
-    // Work from oldest; skip the last TURNS_KEPT_FULL turns.
+    // Aggressive trimming: keep only the last 3 turns full. Older turns
+    // get their large payloads replaced with compact summaries to save
+    // input tokens (and thus quota) on subsequent API calls.
+    const TURNS_KEPT_FULL = 3;
     for (let i = 0; i < conversation.length - TURNS_KEPT_FULL; i++) {
       const turn = conversation[i];
       if (!turn || !turn.parts) continue;
@@ -243,6 +245,18 @@ const Agent = {
           }
           if (Array.isArray(r.matches)) {
             r.matches = `[${r.matches.length} matches omitted]`;
+          }
+          // Trim the overview string — it's the single largest payload
+          // (all sheets, headers, stats, sample rows). Replace with a
+          // compact note so the model knows it saw the overview but
+          // doesn't resend thousands of tokens every round.
+          if (typeof r.overview === 'string' && r.overview.length > 200) {
+            const sheetCount = r.sheets ? r.sheets.length : '?';
+            r.overview = `[workbook overview omitted to save context - ${sheetCount} sheets. Call get_workbook_overview again if you need details.]`;
+          }
+          // Trim the sheets array from old overview responses.
+          if (Array.isArray(r.sheets) && r.sheets.length > 0) {
+            r.sheets = `[${r.sheets.length} sheet names omitted]`;
           }
         }
       }

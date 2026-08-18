@@ -5,8 +5,8 @@
 
 const Config = {
   apiKey: '',
-  model: 'gemini-3.6-flash',
-  fallbackModel: 'gemini-3.5-flash-lite',
+  model: 'gemini-3.5-flash-lite',
+  fallbackModel: 'gemini-3.6-flash',
 
   // Hardcoded key pool — rotated round-robin on every Gemini request.
   // If the user enters their own key in Settings, it's prepended to the
@@ -44,7 +44,7 @@ const Config = {
         savedModel = this.deprecatedModels[savedModel];
         localStorage.setItem('gemini_model', savedModel);
       }
-      this.model = savedModel || 'gemini-3.6-flash';
+      this.model = savedModel || 'gemini-3.5-flash-lite';
     } catch (e) {
       console.warn('Config load failed:', e);
     }

@@ -13,6 +13,15 @@ const Tools = {
   READ_ROW_CAP: 200,
   READ_COL_CAP: 50,
 
+  // Session-level cache for get_workbook_overview. The overview is expensive
+  // to compute (reads ALL sheets) and rarely changes within a session.
+  // Invalidated when sheets are added/deleted or the user clears chat.
+  _overviewCache: null,
+
+  invalidateOverviewCache() {
+    this._overviewCache = null;
+  },
+
   /* ----------------------------------------------------------
      DECLARATIONS — passed to Gemini as tools:[{functionDeclarations}]
      ---------------------------------------------------------- */
@@ -309,8 +318,14 @@ const Tools = {
   handlers: {
     // ---------- READ ----------
     async get_workbook_overview() {
+      // Return cached overview if available (saves reading all sheets again).
+      if (this._overviewCache) {
+        return { ok: true, result: this._overviewCache, cached: true };
+      }
       const snap = await Schema.snapshot();
-      return { ok: true, result: { overview: Schema.toText(snap), sheets: snap.sheets.map(s => ({ name: s.name, rows: s.rows, cols: s.cols, address: s.address })) } };
+      const result = { overview: Schema.toText(snap), sheets: snap.sheets.map(s => ({ name: s.name, rows: s.rows, cols: s.cols, address: s.address })) };
+      this._overviewCache = result;
+      return { ok: true, result };
     },
 
     async read_range({ sheet, range, what = 'values' }) {
@@ -540,6 +555,7 @@ const Tools = {
         await ctx.sync();
       });
       Journal.recordCreatedObject('sheet', name, name);
+      this.invalidateOverviewCache(); // structure changed
       return { ok: true, result: { name } };
     },
 
@@ -557,6 +573,7 @@ const Tools = {
       });
       // Best-effort undo: we can't restore data, but record a marker.
       if (Journal.current) Journal.current.entries.push({ type: 'modified', kind: 'sheet', name, sheet: name });
+      this.invalidateOverviewCache(); // structure changed
       return { ok: true, result: { name, note: 'Sheet deleted. Data on it is not recoverable via undo.' } };
     },
 

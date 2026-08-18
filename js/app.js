@@ -420,6 +420,7 @@ const App = {
   clearChat() {
     this.conversation = [];
     Journal.clear();
+    Tools.invalidateOverviewCache(); // fresh session — force re-read on next request
     this.el.messageList.innerHTML = '';
     this.addMessage('assistant', I18n.t('clearChatDone'));
   },

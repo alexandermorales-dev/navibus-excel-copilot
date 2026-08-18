@@ -45,10 +45,10 @@ const Gemini = {
       contents: contents,
       generationConfig: {
         temperature: 0.4,
-        maxOutputTokens: 24576,
+        maxOutputTokens: 16384,
         thinkingConfig: {
           includeThoughts: true,
-          thinkingLevel: 'medium'
+          thinkingLevel: 'low'
         }
       }
     };
