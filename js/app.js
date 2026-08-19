@@ -151,6 +151,7 @@ const App = {
         conversation: this.conversation,
         signal: this.abortController.signal,
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
+        onThinking: (text) => this.updateLiveThinking(activityEl, text),
         onToolStart: (callId, name, args) => {
           this.addToolRow(activityEl, callId, name, args);
           if (this.isWriteTool(name)) this._hasWrittenThisRun = true;
@@ -214,6 +215,7 @@ const App = {
         conversation: this.conversation,
         signal: this.abortController.signal,
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
+        onThinking: (text) => this.updateLiveThinking(activityEl, text),
         onToolStart: (callId, name, args) => {
           this.addToolRow(activityEl, callId, name, args);
           if (this.isWriteTool(name)) this._hasWrittenThisRun = true;

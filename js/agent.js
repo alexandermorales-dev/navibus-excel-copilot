@@ -107,7 +107,7 @@ const Agent = {
   async run(opts) {
     const {
       userText, conversation, signal,
-      onText, onToolStart, onToolEnd, onToolError, onRound
+      onText, onThinking, onToolStart, onToolEnd, onToolError, onRound
     } = opts;
 
     Journal.beginRequest();
@@ -145,6 +145,10 @@ const Agent = {
           // shows the complete answer as it streams in.
           finalText = continuationBase + full;
           if (onText) onText(chunk, finalText);
+        },
+        onThinking: (text) => {
+          // Fired when the model emits text alongside tool calls (reasoning).
+          if (onThinking) onThinking(text);
         },
         signal
       });
@@ -195,6 +199,10 @@ const Agent = {
       // The model returned function calls — we're in tool-calling mode, so
       // reset the continuation base (any partial text is already in history).
       continuationBase = '';
+
+      // If the model emitted text alongside tool calls, that's reasoning —
+      // fire onThinking so the UI can show it in the thinking block.
+      if (result.text && onThinking) onThinking(result.text);
 
       // Smart routing: check if we should upgrade to the capable model
       // for the next round based on the tools being called.
@@ -288,18 +296,6 @@ const Agent = {
       finalText = I18n.lang === 'es'
         ? `Alcancé el límite de ${this.MAX_ROUNDS} rondas de herramientas. Se completaron ${toolCallCount} llamadas a herramientas. Puedes pedirme que continúe o que verifique el resultado.`
         : `I hit the limit of ${this.MAX_ROUNDS} tool rounds. ${toolCallCount} tool calls completed. You can ask me to continue or to verify the result.`;
-    }
-
-    // If there were tool errors that the model didn't address in its final
-    // answer, append them so the user sees what went wrong.
-    if (toolErrors.length > 0 && finalText) {
-      const errorSummary = toolErrors.map(e => `${e.tool}: ${e.error}`).join('; ');
-      const hasErrorMention = finalText.toLowerCase().includes('error') || finalText.toLowerCase().includes('no se pudo') || finalText.toLowerCase().includes('could not') || finalText.toLowerCase().includes('failed');
-      if (!hasErrorMention) {
-        finalText += I18n.lang === 'es'
-          ? `\n\n⚠ Errores de herramientas: ${errorSummary}`
-          : `\n\n⚠ Tool errors: ${errorSummary}`;
-      }
     }
 
     // Append the final text answer to conversation history as an assistant message.

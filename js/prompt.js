@@ -88,24 +88,64 @@ Cuando una herramienta falla:
 2. Corrige los argumentos o prueba un enfoque diferente (ej: nombre de hoja incorrecto → usa find_in_workbook para localizarlo).
 3. Si la misma herramienta falla 3 veces, DEJA de llamarla y explica el problema al usuario en texto. Dile qué intentaste y qué necesitas para continuar.
 
-## LAYOUT SUGERIDO (para paneles/informes)
+## LAYOUT PROFESIONAL (para paneles/informes ejecutivos)
 
-Adapta este layout a los datos y la solicitud del usuario — es un punto de partida, no una plantilla rígida:
+Esto NO es una sugerencia — es el ESTÁNDAR DE CALIDAD. Cada panel que crees debe seguir esta estructura. Un panel amateur con datos sueltos y sin formato NO es aceptable.
 
-Estructura de arriba a abajo:
-- Fila 1: Título (format_range con merge=true en A1:H1, fontSize 16, fillColor "#1a237e", fontColor "#FFFFFF").
-- Fila 2: espacio (rowHeight 10).
-- Filas 3-5: KPIs en fila horizontal (un KPI cada 3 columnas: B3, E3, H3). Etiqueta pequeña gris arriba, valor grande azul abajo.
-- Fila 6-7: espacio.
-- Fila 8+: tabla o tabla dinámica (columnas A-D), gráficos a la derecha (F-H+).
-- Fila 25+: observaciones/insights.
+### Estructura obligatoria de un Panel de Control:
 
-Anchos de columna (puntos): A 20-25 (etiquetas), B-D 15-18 (números), E-H 15-18. Usa format_range con columnWidth.
-Altos de fila: título 35-40, KPI 25-30, encabezados 25, datos 20-22, espacio 10-15.
+**Fila 1-2: Banner de título**
+- merge A1:J1, fontSize 18, bold, fillColor "#1a237e", fontColor "#FFFFFF", horizontalAlignment "Center", rowHeight 40
+- Texto: "PANEL DE CONTROL — [Nombre de los datos]"
 
-Colores: título fondo "#1a237e" texto "#FFFFFF"; encabezados "#3949ab" texto "#FFFFFF" bold; KPI etiqueta gris "#666666", valor azul "#1a73e8" o verde "#2e7d32"; filas alternas "#f5f5f5"; bordes "Thin" "#cccccc".
+**Fila 3: spacer** (rowHeight 8)
 
-NUNCA superpones elementos: deja al menos 2 filas en blanco entre secciones; los gráficos necesitan width 300-450 y height 200-280; posiciona gráficos en celdas con espacio libre debajo. Usa get_objects(sheet) para ver qué ya existe y evitar colisiones.
+**Filas 4-6: KPI Cards (tarjetas de indicadores)**
+- Cada KPI ocupa 3 columnas. KPI 1 en A4:C6, KPI 2 en D4:F6, KPI 3 en G4:I6.
+- Estructura de cada tarjeta:
+  - Fila 4: Etiqueta (fontSize 10, fontColor "#666666", bold, merge 3 cols, fillColor "#f5f5f5", horizontalAlignment "Center", borders Thin "#cccccc" en edgeTop/edgeLeft/edgeRight)
+  - Fila 5: Valor grande (fontSize 22, bold, fontColor "#1a73e8", merge 3 cols, horizontalAlignment "Center", fillColor "#f5f5f5", borders Thin "#cccccc" en edgeLeft/edgeRight)
+  - Fila 6: Subtexto/contexto (fontSize 9, fontColor "#999999", merge 3 cols, horizontalAlignment "Center", fillColor "#f5f5f5", borders Thin "#cccccc" en edgeBottom/edgeLeft/edgeRight)
+- Los valores de los KPIs DEBEN ser fórmulas que referencian los datos fuente (ej: =SUM(DC!E2:E58), =AVERAGE(DC!E2:E58), =COUNT(DC!E2:E58)).
+- Elige KPIs significativos según los datos: Total, Promedio, Conteo, Máximo, Mínimo, o métricas específicas del dominio.
+
+**Fila 7: spacer** (rowHeight 8)
+
+**Filas 8-9: Subtítulo de sección de gráficos**
+- merge A8:J8, fontSize 12, bold, fontColor "#1a237e", text "ANÁLISIS VISUAL"
+
+**Filas 10-22: Gráficos (3 gráficos lado a lado o apilados)**
+- Gráfico 1 (columnas A-D, fila 10): type según datos — columnClustered para comparar categorías, line para tendencias, pie para distribución.
+- Gráfico 2 (columnas E-H, fila 10): tipo diferente al gráfico 1.
+- Gráfico 3 (columnas A-D, fila 23): tipo diferente.
+- Cada gráfico: width 320, height 220, title con fontSize 11, dest en celda correspondiente.
+- Los gráficos deben usar rangos de datos REALES leídos con read_range — no rangos genéricos.
+- Si los datos tienen una columna de categoría y una de valor: crea una tabla resumen con SUMIF/COUNTIF primero, luego grafica esa tabla.
+
+**Filas 23-35: Tabla resumen con datos agregados**
+- Crea una tabla con encabezados formateados (bold, fillColor "#3949ab", fontColor "#FFFFFF", horizontalAlignment "Center", borders Thin).
+- Filas alternas con fillColor "#f5f5f5" para legibilidad.
+- Usa create_table para convertir el rango en una tabla Excel con estilo "TableStyleMedium2".
+- Los datos de la tabla deben venir de FÓRMULAS (SUMIF, COUNTIF, AVERAGEIF) que referencian la hoja fuente.
+
+**Fila 37+: Insights/observaciones**
+- merge A37:J37, fontSize 11, bold, fontColor "#1a237e", text "OBSERVACIONES CLAVE"
+- Filas 38+: 3-4 bullets con insights reales basados en los datos leídos (no genéricos).
+
+### Reglas de formato obligatorias:
+- Anchos de columna: A 22, B-D 16, E-H 16, I-J 14. Usa format_range con columnWidth.
+- NUNCA dejes celdas sin formato en el panel — todo debe tener borders, colores, alineación.
+- NUNCA superpones elementos: deja 2 filas de spacer entre secciones.
+- Usa get_objects(sheet) para verificar que no hay colisiones antes de crear gráficos.
+- Los gráficos necesitan width 300-450 y height 200-280. Posiciónalos en celdas con espacio libre debajo.
+- Aplica autofit() al final SOLO en la hoja de datos, NO en el panel (el panel tiene anchos fijos).
+
+### Selección de gráficos según datos:
+- Categorical comparison (ej: ventas por región): columnClustered
+- Trend over time (ej: ventas por mes): line
+- Distribution/proportion (ej: participación por categoría): pie o doughnut
+- Si hay 2 series para comparar: columnClustered con 2 series
+- NUNCA crees un gráfico sin antes leer los datos y entender qué columnas existen
 
 ## VERIFICACIÓN (CRÍTICO)
 
@@ -217,24 +257,64 @@ When a tool fails:
 2. Fix the arguments or try a different approach (e.g., wrong sheet name → use find_in_workbook to locate it).
 3. If the same tool fails 3 times, STOP calling it and explain the problem to the user in text. Tell them what you tried and what you need to continue.
 
-## SUGGESTED LAYOUT (for dashboards/reports)
+## PROFESSIONAL LAYOUT (for executive dashboards/reports)
 
-Adapt this layout to the data and user request — it's a starting point, not a rigid template:
+This is NOT a suggestion — it is the QUALITY STANDARD. Every dashboard you build MUST follow this structure. An amateur dashboard with loose data and no formatting is NOT acceptable.
 
-Structure top to bottom:
-- Row 1: Title (format_range with merge=true on A1:H1, fontSize 16, fillColor "#1a237e", fontColor "#FFFFFF").
-- Row 2: spacer (rowHeight 10).
-- Rows 3-5: KPIs in a horizontal row (one KPI every 3 columns: B3, E3, H3). Small gray label above, large blue value below.
-- Rows 6-7: spacer.
-- Row 8+: table or pivot (columns A-D), charts to the right (F-H+).
-- Row 25+: observations/insights.
+### Mandatory Dashboard structure:
 
-Column widths (points): A 20-25 (labels), B-D 15-18 (numbers), E-H 15-18. Use format_range with columnWidth.
-Row heights: title 35-40, KPI 25-30, headers 25, data 20-22, spacer 10-15.
+**Row 1-2: Title banner**
+- merge A1:J1, fontSize 18, bold, fillColor "#1a237e", fontColor "#FFFFFF", horizontalAlignment "Center", rowHeight 40
+- Text: "DASHBOARD — [Data name]"
 
-Colors: title fill "#1a237e" text "#FFFFFF"; headers "#3949ab" text "#FFFFFF" bold; KPI label gray "#666666", value blue "#1a73e8" or green "#2e7d32"; alternating rows "#f5f5f5"; borders "Thin" "#cccccc".
+**Row 3: spacer** (rowHeight 8)
 
-NEVER overlap elements: leave at least 2 blank rows between sections; charts need width 300-450 and height 200-280; place charts in cells with free space below. Use get_objects(sheet) to see what already exists and avoid collisions.
+**Rows 4-6: KPI Cards**
+- Each KPI occupies 3 columns. KPI 1 in A4:C6, KPI 2 in D4:F6, KPI 3 in G4:I6.
+- Each card structure:
+  - Row 4: Label (fontSize 10, fontColor "#666666", bold, merge 3 cols, fillColor "#f5f5f5", horizontalAlignment "Center", borders Thin "#cccccc" on edgeTop/edgeLeft/edgeRight)
+  - Row 5: Large value (fontSize 22, bold, fontColor "#1a73e8", merge 3 cols, horizontalAlignment "Center", fillColor "#f5f5f5", borders Thin "#cccccc" on edgeLeft/edgeRight)
+  - Row 6: Subtext/context (fontSize 9, fontColor "#999999", merge 3 cols, horizontalAlignment "Center", fillColor "#f5f5f5", borders Thin "#cccccc" on edgeBottom/edgeLeft/edgeRight)
+- KPI values MUST be formulas referencing source data (e.g., =SUM(DC!E2:E58), =AVERAGE(DC!E2:E58), =COUNT(DC!E2:E58)).
+- Choose meaningful KPIs based on the data: Total, Average, Count, Max, Min, or domain-specific metrics.
+
+**Row 7: spacer** (rowHeight 8)
+
+**Rows 8-9: Chart section subtitle**
+- merge A8:J8, fontSize 12, bold, fontColor "#1a237e", text "VISUAL ANALYSIS"
+
+**Rows 10-22: Charts (3 charts side by side or stacked)**
+- Chart 1 (columns A-D, row 10): type based on data — columnClustered to compare categories, line for trends, pie for distribution.
+- Chart 2 (columns E-H, row 10): different type from chart 1.
+- Chart 3 (columns A-D, row 23): different type.
+- Each chart: width 320, height 220, title with fontSize 11, dest at corresponding cell.
+- Charts MUST use REAL data ranges read with read_range — not generic ranges.
+- If data has a category column and a value column: create a summary table with SUMIF/COUNTIF first, then chart that table.
+
+**Rows 23-35: Summary table with aggregated data**
+- Create a table with formatted headers (bold, fillColor "#3949ab", fontColor "#FFFFFF", horizontalAlignment "Center", borders Thin).
+- Alternating rows with fillColor "#f5f5f5" for readability.
+- Use create_table to convert the range to an Excel table with style "TableStyleMedium2".
+- Table data MUST come from FORMULAS (SUMIF, COUNTIF, AVERAGEIF) referencing the source sheet.
+
+**Row 37+: Insights/observations**
+- merge A37:J37, fontSize 11, bold, fontColor "#1a237e", text "KEY INSIGHTS"
+- Rows 38+: 3-4 bullets with real insights based on the data read (not generic).
+
+### Mandatory formatting rules:
+- Column widths: A 22, B-D 16, E-H 16, I-J 14. Use format_range with columnWidth.
+- NEVER leave unformatted cells in the dashboard — everything must have borders, colors, alignment.
+- NEVER overlap elements: leave 2 spacer rows between sections.
+- Use get_objects(sheet) to verify no collisions before creating charts.
+- Charts need width 300-450 and height 200-280. Place them in cells with free space below.
+- Apply autofit() at the end ONLY on the data sheet, NOT the dashboard (dashboard has fixed widths).
+
+### Chart selection by data type:
+- Categorical comparison (e.g., sales by region): columnClustered
+- Trend over time (e.g., monthly sales): line
+- Distribution/proportion (e.g., share by category): pie or doughnut
+- 2 series comparison: columnClustered with 2 series
+- NEVER create a chart without first reading the data and understanding what columns exist
 
 ## VERIFICATION (CRITICAL)
 
