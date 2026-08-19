@@ -87,7 +87,8 @@ const Agent = {
   MAX_ROUNDS: 15,           // hard cap on tool-call rounds per request
   MAX_CONSECUTIVE_ERRORS: 3,// bail if the same tool keeps failing
   MAX_CONTINUATIONS: 3,     // auto-continue attempts when MAX_TOKENS truncates a response
-  STALE_ROUNDS: 5,          // if no successful write after this many rounds, nudge the model
+  STALE_ROUNDS: 3,          // if no successful write after this many rounds, nudge the model
+  REMINDER_ROUNDS: 4,       // re-inject original request to keep the model focused
 
   /**
    * Run the agent loop for one user message.
@@ -264,12 +265,12 @@ const Agent = {
         });
 
         if (consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
-          // Tell the model to stop retrying this tool and explain.
+          // Don't bail — tell the model to try a DIFFERENT approach.
           conversation.push({
             role: 'user',
             content: I18n.lang === 'es'
-              ? `SYSTEM: La herramienta "${fc.name}" ha fallado ${consecutiveErrors} veces consecutivas con error: ${toolResult.error}. Deja de intentar esta herramienta y responde al usuario en texto explicando el problema y qué información necesitas para continuar.`
-              : `SYSTEM: Tool "${fc.name}" has failed ${consecutiveErrors} consecutive times with error: ${toolResult.error}. Stop trying this tool and respond to the user in text explaining the problem and what information you need to continue.`
+              ? `SYSTEM: La herramienta "${fc.name}" ha fallado ${consecutiveErrors} veces con error: ${toolResult.error}. NO insistas con la misma herramienta y los mismos argumentos. Prueba un enfoque diferente: usa find_in_workbook para localizar la hoja/rango correcto, o usa read_range con un rango más pequeño, o crea una hoja nueva y procede con lo que ya sabes. Tienes datos leídos en tu historial — úsalos. El usuario quiere un resultado, no una explicación de por qué falló.`
+              : `SYSTEM: Tool "${fc.name}" has failed ${consecutiveErrors} times with error: ${toolResult.error}. DO NOT retry the same tool with the same arguments. Try a different approach: use find_in_workbook to locate the correct sheet/range, or use read_range with a smaller range, or create a new sheet and proceed with what you already know. You have data in your history — use it. The user wants a result, not an explanation of why it failed.`
           });
           consecutiveErrors = 0;
           lastErrorTool = null;
@@ -282,16 +283,28 @@ const Agent = {
       this.trimHistory(conversation);
 
       // Stale detection: if the model has been reading for too many rounds
-      // without writing anything, nudge it to start building.
+      // without writing anything, nudge it to start building — and remind
+      // it what the user actually asked for so it doesn't lose the goal.
       roundsSinceWrite++;
       if (writeSuccessCount === 0 && roundsSinceWrite >= this.STALE_ROUNDS && round < this.MAX_ROUNDS) {
         conversation.push({
           role: 'user',
           content: I18n.lang === 'es'
-            ? `SYSTEM: Has pasado ${roundsSinceWrite} rondas leyendo datos sin escribir nada. Ya tienes suficiente información. DEJA de leer y EMPIEZA a construir: crea la hoja, escribe los KPIs con fórmulas, formatea, y crea los gráficos. Si necesitas más datos, pídelos al usuario en tu respuesta final.`
-            : `SYSTEM: You have spent ${roundsSinceWrite} rounds reading data without writing anything. You have enough information. STOP reading and START building: create the sheet, write KPIs with formulas, format, and create charts. If you need more data, ask the user in your final answer.`
+            ? `SYSTEM: Has pasado ${roundsSinceWrite} rondas leyendo datos sin escribir nada. Ya tienes suficiente información. DEJA de leer y EMPIEZA a construir AHORA. El usuario pidió: "${userText}". Crea la hoja, escribe los KPIs con fórmulas, formatea, y crea los gráficos con los datos que ya leíste. Si falta algún dato, procede con lo que tienes y pide el resto al final.`
+            : `SYSTEM: You have spent ${roundsSinceWrite} rounds reading data without writing anything. You have enough information. STOP reading and START building NOW. The user asked: "${userText}". Create the sheet, write KPIs with formulas, format, and create charts with the data you already read. If some data is missing, proceed with what you have and ask for the rest in your final answer.`
         });
         roundsSinceWrite = 0; // reset to avoid repeated nudges
+      }
+
+      // Periodic reminder: re-inject the original request so the model
+      // stays focused on the user's actual goal instead of wandering.
+      if (round > 0 && round % this.REMINDER_ROUNDS === 0 && round < this.MAX_ROUNDS) {
+        conversation.push({
+          role: 'user',
+          content: I18n.lang === 'es'
+            ? `SYSTEM: Recordatorio — la solicitud original del usuario era: "${userText}". Asegúrate de estar avanzando hacia ese objetivo, no explorando datos sin propósito.`
+            : `SYSTEM: Reminder — the user's original request was: "${userText}". Make sure you are progressing toward that goal, not exploring data aimlessly.`
+        });
       }
 
       // If the model also emitted final text alongside the calls, treat that
