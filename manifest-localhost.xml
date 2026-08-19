@@ -79,7 +79,7 @@
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="GetStarted.Description" DefaultValue="AI-powered assistant for creating reports, dashboards, tables, and charts in Excel." />
-        <bt:String id="CopilotButton.Tooltip" DefaultValue="Open the AI Copilot sidebar to chat with Gemini." />
+        <bt:String id="CopilotButton.Tooltip" DefaultValue="Open the AI Copilot sidebar to chat with AI." />
       </bt:LongStrings>
     </Resources>
   </VersionOverrides>

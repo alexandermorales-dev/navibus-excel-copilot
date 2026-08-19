@@ -32,8 +32,8 @@ const I18n = {
       en: "Hi! I'm your Excel AI Copilot. I can build reports, dashboards, tables, charts and more — and answer questions about your data."
     },
     welcomeHint: {
-      es: 'Listo para usar. Opcional: ingresa tu propia API key en Configuración.',
-      en: 'Ready to use. Optional: enter your own API key in Settings.'
+      es: 'Listo para usar. Para mejor rendimiento, ingresa tu propia API key en Configuración.',
+      en: 'Ready to use. For better performance, enter your own API key in Settings.'
     },
     placeholder: {
       es: 'Pregúntame sobre tus datos o pídeme crear algo... (ej: crea un panel de control)',
@@ -48,8 +48,8 @@ const I18n = {
       en: 'Chat cleared. What would you like to do?'
     },
     needApiKey: {
-      es: 'Por favor, ingresa tu API key de Gemini en Configuración primero.',
-      en: 'Please enter your Gemini API key in Settings first.'
+      es: 'No hay API key configurada. Ingresa tu API key en Configuración.',
+      en: 'No API key configured. Enter your API key in Settings.'
     },
 
     // --- Status / live activity ---
@@ -100,16 +100,12 @@ const I18n = {
     },
 
     // --- Errors ---
-    geminiError:   { es: 'Error de Gemini',   en: 'Gemini error' },
+    aiError:       { es: 'Error de IA',     en: 'AI error' },
     workbookError: { es: 'No se pudo leer el libro', en: 'Could not read workbook' },
     genericError:  { es: 'Error',             en: 'Error' },
     retryButton:   { es: 'Reintentar',        en: 'Retry' },
 
-    // --- Gemini API status messages ---
-    dailyQuota: {
-      es: 'Cuota diaria de Gemini agotada. Se reinicia a medianoche (hora del Pacífico).',
-      en: 'Daily Gemini quota exhausted. Resets at midnight Pacific time.'
-    },
+    // --- Groq API status messages ---
     rateLimit: {
       es: (s) => `Límite de tasa — esperando ${s}s...`,
       en: (s) => `Rate limited — waiting ${s}s...`
@@ -124,9 +120,9 @@ const I18n = {
       en: (s) => `Network error: ${s}`
     },
     unknownError: { es: 'Error desconocido tras reintentos', en: 'Unknown error after retries' },
-    fallbackModel: {
-      es: 'Modelo principal falló, probando alternativa...',
-      en: 'Primary model failed, trying fallback...'
+    invalidKey: {
+      es: 'Tu API key es inválida. Verifícala en Configuración.',
+      en: 'Your API key is invalid. Check it in Settings.'
     }
   },
 

@@ -1,6 +1,6 @@
 /* ============================================
    tools.js — Tool registry for the agentic loop
-   - declarations: Gemini functionDeclarations (name/description/JSON schema)
+   - declarations: OpenAI tool format (type/function/name/description/JSON schema)
    - handlers:      async (args) -> { ok, result } | { ok:false, error }
    Every mutating tool records pre-images with the Journal so the user
    can undo the whole request. Every tool returns verified post-state so
@@ -23,268 +23,321 @@ const Tools = {
   },
 
   /* ----------------------------------------------------------
-     DECLARATIONS — passed to Gemini as tools:[{functionDeclarations}]
+     DECLARATIONS — passed to Groq as tools:[{type:'function',function:{...}}]
      ---------------------------------------------------------- */
   declarations() {
-    return [{
-      functionDeclarations: [
+    return [
         // --- READ ---
         {
-          name: 'get_workbook_overview',
-          description: 'Return a compact overview of every visible worksheet: name, used-range address, row/column counts, headers, column types, and numeric column stats (sum/avg/min/max/count). Call this first to understand the workbook STRUCTURE (sheet names, headers, column types). The stats are GLOBAL aggregates over ALL rows — do NOT use them to answer questions about specific or filtered data; use read_range() on the exact range instead.'
-        },
-        {
-          name: 'read_range',
-          description: 'Read the values (or formulas, or number formats) of a specific range. Use this to inspect exact cells before referencing them in formulas, or to answer questions about specific data. Returns a 2D array plus the resolved range address.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:  { type: 'string', description: 'Worksheet name.' },
-              range:  { type: 'string', description: 'Range address like "A1:D50" or a single cell "B3".' },
-              what:   { type: 'string', enum: ['values', 'formulas', 'formats'], description: 'What to read. Default: values.' }
-            },
-            required: ['sheet', 'range']
+          type: 'function',
+          function: {
+            name: 'get_workbook_overview',
+            description: 'Return a compact overview of every visible worksheet: name, used-range address, row/column counts, headers, column types, and numeric column stats (sum/avg/min/max/count). Call this first to understand the workbook STRUCTURE (sheet names, headers, column types). The stats are GLOBAL aggregates over ALL rows — do NOT use them to answer questions about specific or filtered data; use read_range() on the exact range instead.',
+            parameters: { type: 'object', properties: {} }
           }
         },
         {
-          name: 'find_in_workbook',
-          description: 'Search for cells containing a text or numeric value across a sheet (or all visible sheets). Returns up to 20 matches as {sheet, address, value}. Use to locate a label or value before building formulas.',
-          parameters: {
-            type: 'object',
-            properties: {
-              query: { type: 'string', description: 'Text or number to search for (case-insensitive substring match).' },
-              sheet: { type: 'string', description: 'Optional: limit to this sheet. Omit to search all visible sheets.' }
-            },
-            required: ['query']
+          type: 'function',
+          function: {
+            name: 'read_range',
+            description: 'Read the values (or formulas, or number formats) of a specific range. Use this to inspect exact cells before referencing them in formulas, or to answer questions about specific data. Returns a 2D array plus the resolved range address.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:  { type: 'string', description: 'Worksheet name.' },
+                range:  { type: 'string', description: 'Range address like "A1:D50" or a single cell "B3".' },
+                what:   { type: 'string', enum: ['values', 'formulas', 'formats'], description: 'What to read. Default: values.' }
+              },
+              required: ['sheet', 'range']
+            }
           }
         },
         {
-          name: 'get_objects',
-          description: 'List existing Excel objects (tables, pivotTables, charts, slicers, named ranges) optionally on a specific sheet. Use before creating new objects to avoid name collisions and to find free space on the sheet.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet: { type: 'string', description: 'Optional: limit to this sheet.' }
+          type: 'function',
+          function: {
+            name: 'find_in_workbook',
+            description: 'Search for cells containing a text or numeric value across a sheet (or all visible sheets). Returns up to 20 matches as {sheet, address, value}. Use to locate a label or value before building formulas.',
+            parameters: {
+              type: 'object',
+              properties: {
+                query: { type: 'string', description: 'Text or number to search for (case-insensitive substring match).' },
+                sheet: { type: 'string', description: 'Optional: limit to this sheet. Omit to search all visible sheets.' }
+              },
+              required: ['query']
+            }
+          }
+        },
+        {
+          type: 'function',
+          function: {
+            name: 'get_objects',
+            description: 'List existing Excel objects (tables, pivotTables, charts, slicers, named ranges) optionally on a specific sheet. Use before creating new objects to avoid name collisions and to find free space on the sheet.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet: { type: 'string', description: 'Optional: limit to this sheet.' }
+              }
             }
           }
         },
 
         // --- WRITE / EDIT ---
         {
-          name: 'write_range',
-          description: 'Write a 2D array of values to a range. Any cell value starting with "=" is written as a live Excel formula. Returns the resolved range address and a small sample of the written result (so you can detect #REF!/#VALUE! errors). Records an undo pre-image.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:        { type: 'string' },
-              range:        { type: 'string', description: 'Top-left anchor like "A1" or a full range "A1:C3".' },
-              values:       { type: 'array', items: { type: 'array', items: {} }, description: '2D array of values/formulas.' },
-              numberFormat: { type: 'string', description: 'Optional Excel number format applied to the whole range, e.g. "#,##0" or "0.0%".' }
-            },
-            required: ['sheet', 'range', 'values']
+          type: 'function',
+          function: {
+            name: 'write_range',
+            description: 'Write a 2D array of values to a range. Any cell value starting with "=" is written as a live Excel formula. Returns the resolved range address and a small sample of the written result (so you can detect #REF!/#VALUE! errors). Records an undo pre-image.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:        { type: 'string' },
+                range:        { type: 'string', description: 'Top-left anchor like "A1" or a full range "A1:C3".' },
+                values:       { type: 'array', items: { type: 'array', items: {} }, description: '2D array of values/formulas.' },
+                numberFormat: { type: 'string', description: 'Optional Excel number format applied to the whole range, e.g. "#,##0" or "0.0%".' }
+              },
+              required: ['sheet', 'range', 'values']
+            }
           }
         },
         {
-          name: 'format_range',
-          description: 'Apply formatting to a range: bold/italic, font size/name/color, fill color, alignment, wrap, number format, column width (points), row height (points), borders, and merge. Records an undo pre-image.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:                { type: 'string' },
-              range:                { type: 'string' },
-              bold:                 { type: 'boolean' },
-              italic:               { type: 'boolean' },
-              fontSize:             { type: 'number' },
-              fontName:             { type: 'string' },
-              fontColor:            { type: 'string', description: 'Hex like "#1a237e".' },
-              fillColor:            { type: 'string', description: 'Hex like "#FFFFFF".' },
-              horizontalAlignment:  { type: 'string', enum: ['Left', 'Center', 'Right'] },
-              verticalAlignment:    { type: 'string', enum: ['Top', 'Center', 'Bottom'] },
-              wrapText:             { type: 'boolean' },
-              numberFormat:         { type: 'string' },
-              columnWidth:          { type: 'number', description: 'Points. 90-120 short text, 140-200 long text, 70-90 numbers.' },
-              rowHeight:            { type: 'number', description: 'Points. 20-25 normal, 30-40 headers.' },
-              borders:              { type: 'string', description: '"Thin"|"Thick" or object like {"edgeTop":"Thin","edgeBottom":"Thin"}.' },
-              merge:                { type: 'boolean', description: 'Merge the range into one cell.' }
-            },
-            required: ['sheet', 'range']
+          type: 'function',
+          function: {
+            name: 'format_range',
+            description: 'Apply formatting to a range: bold/italic, font size/name/color, fill color, alignment, wrap, number format, column width (points), row height (points), borders, and merge. Records an undo pre-image.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:                { type: 'string' },
+                range:                { type: 'string' },
+                bold:                 { type: 'boolean' },
+                italic:               { type: 'boolean' },
+                fontSize:             { type: 'number' },
+                fontName:             { type: 'string' },
+                fontColor:            { type: 'string', description: 'Hex like "#1a237e".' },
+                fillColor:            { type: 'string', description: 'Hex like "#FFFFFF".' },
+                horizontalAlignment:  { type: 'string', enum: ['Left', 'Center', 'Right'] },
+                verticalAlignment:    { type: 'string', enum: ['Top', 'Center', 'Bottom'] },
+                wrapText:             { type: 'boolean' },
+                numberFormat:         { type: 'string' },
+                columnWidth:          { type: 'number', description: 'Points. 90-120 short text, 140-200 long text, 70-90 numbers.' },
+                rowHeight:            { type: 'number', description: 'Points. 20-25 normal, 30-40 headers.' },
+                borders:              { type: 'string', description: '"Thin"|"Thick" or object like {"edgeTop":"Thin","edgeBottom":"Thin"}.' },
+                merge:                { type: 'boolean', description: 'Merge the range into one cell.' }
+              },
+              required: ['sheet', 'range']
+            }
           }
         },
         {
-          name: 'clear_range',
-          description: 'Clear values and formatting from a range. Records an undo pre-image.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet: { type: 'string' },
-              range: { type: 'string' }
-            },
-            required: ['sheet', 'range']
+          type: 'function',
+          function: {
+            name: 'clear_range',
+            description: 'Clear values and formatting from a range. Records an undo pre-image.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet: { type: 'string' },
+                range: { type: 'string' }
+              },
+              required: ['sheet', 'range']
+            }
           }
         },
         {
-          name: 'add_sheet',
-          description: 'Create a new worksheet and activate it. Records it for undo. Returns the created sheet name.',
-          parameters: {
-            type: 'object',
-            properties: {
-              name:     { type: 'string' },
-              tabColor: { type: 'string', description: 'Optional hex color for the tab.' }
-            },
-            required: ['name']
+          type: 'function',
+          function: {
+            name: 'add_sheet',
+            description: 'Create a new worksheet and activate it. Records it for undo. Returns the created sheet name.',
+            parameters: {
+              type: 'object',
+              properties: {
+                name:     { type: 'string' },
+                tabColor: { type: 'string', description: 'Optional hex color for the tab.' }
+              },
+              required: ['name']
+            }
           }
         },
         {
-          name: 'delete_sheet',
-          description: 'Delete a worksheet. Only allowed for sheets created during the current user request, or when the user explicitly asked to delete a named sheet. Records undo as a recreated empty sheet (data on deleted sheets is NOT recoverable — confirm with the user before deleting data sheets).',
-          parameters: {
-            type: 'object',
-            properties: {
-              name:           { type: 'string' },
-              userRequested:  { type: 'boolean', description: 'True if the user explicitly asked to delete this sheet by name.' }
-            },
-            required: ['name']
+          type: 'function',
+          function: {
+            name: 'delete_sheet',
+            description: 'Delete a worksheet. Only allowed for sheets created during the current user request, or when the user explicitly asked to delete a named sheet. Records undo as a recreated empty sheet (data on deleted sheets is NOT recoverable — confirm with the user before deleting data sheets).',
+            parameters: {
+              type: 'object',
+              properties: {
+                name:           { type: 'string' },
+                userRequested:  { type: 'boolean', description: 'True if the user explicitly asked to delete this sheet by name.' }
+              },
+              required: ['name']
+            }
           }
         },
         {
-          name: 'create_table',
-          description: 'Create an Excel Table from a range (header row expected). Records undo.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:  { type: 'string' },
-              range:  { type: 'string', description: 'Full range including header row, e.g. "A1:D100".' },
-              name:   { type: 'string' },
-              style:  { type: 'string', description: 'e.g. "TableStyleMedium2".' }
-            },
-            required: ['sheet', 'range', 'name']
+          type: 'function',
+          function: {
+            name: 'create_table',
+            description: 'Create an Excel Table from a range (header row expected). Records undo.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:  { type: 'string' },
+                range:  { type: 'string', description: 'Full range including header row, e.g. "A1:D100".' },
+                name:   { type: 'string' },
+                style:  { type: 'string', description: 'e.g. "TableStyleMedium2".' }
+              },
+              required: ['sheet', 'range', 'name']
+            }
           }
         },
         {
-          name: 'create_pivot',
-          description: 'Create a PivotTable from a source range onto a destination cell. Records undo.',
-          parameters: {
-            type: 'object',
-            properties: {
-              destSheet: { type: 'string', description: 'Sheet where the pivot will be placed.' },
-              dest:      { type: 'string', description: 'Destination cell, e.g. "A10".' },
-              source:    { type: 'string', description: 'Source range with headers, e.g. "Datos!A1:M500".' },
-              name:      { type: 'string' },
-              rows:      { type: 'array', items: { type: 'string' } },
-              cols:      { type: 'array', items: { type: 'string' } },
-              values:    { type: 'array', items: { type: 'object', properties: { col: { type: 'string' }, agg: { type: 'string', enum: ['sum', 'count', 'average', 'max', 'min'] } } } },
-              filters:   { type: 'array', items: { type: 'string' } }
-            },
-            required: ['destSheet', 'dest', 'source', 'name']
+          type: 'function',
+          function: {
+            name: 'create_pivot',
+            description: 'Create a PivotTable from a source range onto a destination cell. Records undo.',
+            parameters: {
+              type: 'object',
+              properties: {
+                destSheet: { type: 'string', description: 'Sheet where the pivot will be placed.' },
+                dest:      { type: 'string', description: 'Destination cell, e.g. "A10".' },
+                source:    { type: 'string', description: 'Source range with headers, e.g. "Datos!A1:M500".' },
+                name:      { type: 'string' },
+                rows:      { type: 'array', items: { type: 'string' } },
+                cols:      { type: 'array', items: { type: 'string' } },
+                values:    { type: 'array', items: { type: 'object', properties: { col: { type: 'string' }, agg: { type: 'string', enum: ['sum', 'count', 'average', 'max', 'min'] } } } },
+                filters:   { type: 'array', items: { type: 'string' } }
+              },
+              required: ['destSheet', 'dest', 'source', 'name']
+            }
           }
         },
         {
-          name: 'create_chart',
-          description: 'Create a chart from a range or a pivot table. Records undo.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:        { type: 'string', description: 'Sheet where the chart will be placed.' },
-              type:         { type: 'string', enum: ['columnClustered', 'columnStacked', 'barClustered', 'barStacked', 'line', 'pie', 'doughnut', 'area'] },
-              sourceRange:  { type: 'string', description: 'Source range on the same sheet, e.g. "A10:B20".' },
-              sourcePivot:  { type: 'string', description: 'Name of a pivot table to chart. If given, sourceSheet should name the pivot\'s sheet.' },
-              sourceSheet:  { type: 'string', description: 'Sheet containing the pivot (only when sourcePivot is used).' },
-              dest:         { type: 'string', description: 'Anchor cell, e.g. "E10".' },
-              title:        { type: 'string' },
-              width:        { type: 'number', description: 'Points. 300-450 typical.' },
-              height:       { type: 'number', description: 'Points. 200-280 typical.' }
-            },
-            required: ['sheet', 'type', 'dest']
+          type: 'function',
+          function: {
+            name: 'create_chart',
+            description: 'Create a chart from a range or a pivot table. Records undo.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:        { type: 'string', description: 'Sheet where the chart will be placed.' },
+                type:         { type: 'string', enum: ['columnClustered', 'columnStacked', 'barClustered', 'barStacked', 'line', 'pie', 'doughnut', 'area'] },
+                sourceRange:  { type: 'string', description: 'Source range on the same sheet, e.g. "A10:B20".' },
+                sourcePivot:  { type: 'string', description: 'Name of a pivot table to chart. If given, sourceSheet should name the pivot\'s sheet.' },
+                sourceSheet:  { type: 'string', description: 'Sheet containing the pivot (only when sourcePivot is used).' },
+                dest:         { type: 'string', description: 'Anchor cell, e.g. "E10".' },
+                title:        { type: 'string' },
+                width:        { type: 'number', description: 'Points. 300-450 typical.' },
+                height:       { type: 'number', description: 'Points. 200-280 typical.' }
+              },
+              required: ['sheet', 'type', 'dest']
+            }
           }
         },
         {
-          name: 'add_slicer',
-          description: 'Add a slicer to a pivot table or table. Records undo.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:        { type: 'string', description: 'Sheet where the slicer will be placed.' },
-              sourcePivot:  { type: 'string' },
-              sourceTable:  { type: 'string' },
-              field:        { type: 'string', description: 'Column/field name for the slicer.' },
-              dest:         { type: 'string', description: 'Anchor cell.' },
-              name:         { type: 'string' }
-            },
-            required: ['sheet', 'field', 'dest']
+          type: 'function',
+          function: {
+            name: 'add_slicer',
+            description: 'Add a slicer to a pivot table or table. Records undo.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:        { type: 'string', description: 'Sheet where the slicer will be placed.' },
+                sourcePivot:  { type: 'string' },
+                sourceTable:  { type: 'string' },
+                field:        { type: 'string', description: 'Column/field name for the slicer.' },
+                dest:         { type: 'string', description: 'Anchor cell.' },
+                name:         { type: 'string' }
+              },
+              required: ['sheet', 'field', 'dest']
+            }
           }
         },
         {
-          name: 'conditional_format',
-          description: 'Add conditional formatting to a range. Records undo.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet: { type: 'string' },
-              range: { type: 'string' },
-              type:  { type: 'string', enum: ['colorScale', 'dataBar', 'cellValue'] },
-              rules: { type: 'array', items: { type: 'object', properties: { operator: { type: 'string' }, value: { type: 'number' }, color: { type: 'string' } } }, description: 'Required for type="cellValue".' }
-            },
-            required: ['sheet', 'range', 'type']
+          type: 'function',
+          function: {
+            name: 'conditional_format',
+            description: 'Add conditional formatting to a range. Records undo.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet: { type: 'string' },
+                range: { type: 'string' },
+                type:  { type: 'string', enum: ['colorScale', 'dataBar', 'cellValue'] },
+                rules: { type: 'array', items: { type: 'object', properties: { operator: { type: 'string' }, value: { type: 'number' }, color: { type: 'string' } } }, description: 'Required for type="cellValue".' }
+              },
+              required: ['sheet', 'range', 'type']
+            }
           }
         },
         {
-          name: 'autofit',
-          description: 'Auto-fit column widths and/or row heights on a sheet. Use after writing data so columns size to content. Pass cols/rows as arrays of letters/numbers, or omit to auto-fit the whole used range.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet: { type: 'string' },
-              cols:  { type: 'array', items: { type: 'string' }, description: 'Column letters, e.g. ["A","B","C"].' },
-              rows:  { type: 'array', items: { type: 'number' }, description: 'Row numbers.' }
-            },
-            required: ['sheet']
+          type: 'function',
+          function: {
+            name: 'autofit',
+            description: 'Auto-fit column widths and/or row heights on a sheet. Use after writing data so columns size to content. Pass cols/rows as arrays of letters/numbers, or omit to auto-fit the whole used range.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet: { type: 'string' },
+                cols:  { type: 'array', items: { type: 'string' }, description: 'Column letters, e.g. ["A","B","C"].' },
+                rows:  { type: 'array', items: { type: 'number' }, description: 'Row numbers.' }
+              },
+              required: ['sheet']
+            }
           }
         },
         {
-          name: 'insert_rows_cols',
-          description: 'Insert rows or columns at a position, shifting existing data. Records structural undo (partial).',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:  { type: 'string' },
-              kind:   { type: 'string', enum: ['rows', 'columns'] },
-              at:     { type: 'number', description: '1-based index where insertion starts.' },
-              count:  { type: 'number', description: 'How many to insert. Default 1.' }
-            },
-            required: ['sheet', 'kind', 'at']
+          type: 'function',
+          function: {
+            name: 'insert_rows_cols',
+            description: 'Insert rows or columns at a position, shifting existing data. Records structural undo (partial).',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:  { type: 'string' },
+                kind:   { type: 'string', enum: ['rows', 'columns'] },
+                at:     { type: 'number', description: '1-based index where insertion starts.' },
+                count:  { type: 'number', description: 'How many to insert. Default 1.' }
+              },
+              required: ['sheet', 'kind', 'at']
+            }
           }
         },
         {
-          name: 'delete_rows_cols',
-          description: 'Delete rows or columns, shifting remaining data. Destructive — confirm with the user before deleting data. Records structural undo (partial).',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:  { type: 'string' },
-              kind:   { type: 'string', enum: ['rows', 'columns'] },
-              at:     { type: 'number', description: '1-based index where deletion starts.' },
-              count:  { type: 'number', description: 'How many to delete. Default 1.' }
-            },
-            required: ['sheet', 'kind', 'at']
+          type: 'function',
+          function: {
+            name: 'delete_rows_cols',
+            description: 'Delete rows or columns, shifting remaining data. Destructive — confirm with the user before deleting data. Records structural undo (partial).',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:  { type: 'string' },
+                kind:   { type: 'string', enum: ['rows', 'columns'] },
+                at:     { type: 'number', description: '1-based index where deletion starts.' },
+                count:  { type: 'number', description: 'How many to delete. Default 1.' }
+              },
+              required: ['sheet', 'kind', 'at']
+            }
           }
         },
         {
-          name: 'sort_range',
-          description: 'Sort a range by a key column. Records undo pre-image of the range.',
-          parameters: {
-            type: 'object',
-            properties: {
-              sheet:      { type: 'string' },
-              range:      { type: 'string', description: 'Full range to sort, including header row if hasHeader=true.' },
-              keyColumn:  { type: 'number', description: '1-based column index within the range to sort by.' },
-              ascending:  { type: 'boolean', description: 'Default true.' },
-              hasHeader:  { type: 'boolean', description: 'Default true.' }
-            },
-            required: ['sheet', 'range', 'keyColumn']
+          type: 'function',
+          function: {
+            name: 'sort_range',
+            description: 'Sort a range by a key column. Records undo pre-image of the range.',
+            parameters: {
+              type: 'object',
+              properties: {
+                sheet:      { type: 'string' },
+                range:      { type: 'string', description: 'Full range to sort, including header row if hasHeader=true.' },
+                keyColumn:  { type: 'number', description: '1-based column index within the range to sort by.' },
+                ascending:  { type: 'boolean', description: 'Default true.' },
+                hasHeader:  { type: 'boolean', description: 'Default true.' }
+              },
+              required: ['sheet', 'range', 'keyColumn']
+            }
           }
         }
-      ]
-    }];
+      ];
   },
 
   /* ----------------------------------------------------------

@@ -1,14 +1,87 @@
 /* ============================================
    agent.js — Iterative tool-calling agent loop
-   Drives Gemini + Tools + Journal to fulfill a user request:
-     call → if functionCalls, dispatch tools, push functionResponse(s)
+   Drives Groq + Tools + Journal to fulfill a user request:
+     call → if tool_calls, dispatch tools, push tool response messages
      back → repeat until the model emits a final text answer (or budget
      exhausted, or user clicks Stop).
 
-   Conversation history (Gemini contents format) is owned by App and
-   passed in; the agent appends model turns (with functionCall parts)
-   and user turns (with functionResponse parts) as it goes.
+   Smart Routing: when Config.model === 'smart', the agent classifies
+   the user's request and routes to a fast model (8B) for simple tasks
+   or a capable model (70B) for complex builds. It can also upgrade
+   mid-request if the fast model starts calling complex tools.
+
+   Conversation history (OpenAI messages format) is owned by App and
+   passed in; the agent appends assistant turns (with tool_calls) and
+   tool response messages as it goes.
    ============================================ */
+
+// Tools that signal a complex workflow requiring the capable model.
+const COMPLEX_TOOLS = new Set([
+  'write_range', 'format_range', 'add_sheet', 'delete_sheet',
+  'create_table', 'create_pivot', 'create_chart', 'add_slicer',
+  'conditional_format', 'insert_rows_cols', 'delete_rows_cols', 'sort_range'
+]);
+
+// Intent keywords that signal a complex build/analysis request.
+const COMPLEX_KEYWORDS = [
+  // Build/create actions
+  'create', 'build', 'make', 'generate', 'construct', 'set up', 'setup',
+  'dashboard', 'report', 'panel', 'informe', 'crear', 'construir', 'generar',
+  'tabla', 'gráfico', 'grafico', 'pivot', 'dinámica', 'dinamica',
+  // Analysis actions
+  'analyze', 'analysis', 'analizar', 'análisis', 'compare', 'comparar',
+  'troubleshoot', 'debug', 'fix', 'repair', 'corregir', 'arreglar',
+  'formula', 'fórmula', 'calculate', 'calcular', 'summary', 'resumen',
+  // Formatting/layout
+  'format', 'formatear', 'layout', 'design', 'diseño', 'diseñar',
+  'conditional', 'condicional', 'slicer', 'segmentador',
+  // Complex operations
+  'merge', 'combinar', 'consolidate', 'consolidar', 'reconcile', 'conciliar',
+  'forecast', 'pronóstico', 'pronostico', 'trend', 'tendencia',
+  'variance', 'varianza', 'budget', 'presupuesto'
+];
+
+const Router = {
+  /**
+   * Classify the user's request as simple or complex.
+   * Returns the model name to use for the first round.
+   */
+  classify(userText) {
+    // If user picked a specific model, always use it.
+    if (Config.model !== 'smart') return Config.model;
+
+    const lower = userText.toLowerCase();
+
+    // Check for complex keywords
+    for (const kw of COMPLEX_KEYWORDS) {
+      if (lower.includes(kw)) return Config.capableModel;
+    }
+
+    // Multi-sentence requests are likely complex
+    const sentences = userText.split(/[.!?;]+/).filter(s => s.trim().length > 0);
+    if (sentences.length > 2) return Config.capableModel;
+
+    // Default: fast model for simple questions and lookups
+    return Config.fastModel;
+  },
+
+  /**
+   * Decide whether to upgrade from fast to capable model based on
+   * the tools called in the current round.
+   * Returns the model to use for the next round, or null to keep current.
+   */
+  shouldUpgrade(currentModel, functionCalls) {
+    if (currentModel === Config.capableModel) return null;
+    if (Config.model !== 'smart') return null;
+
+    for (const fc of functionCalls) {
+      if (COMPLEX_TOOLS.has(fc.name)) {
+        return Config.capableModel;
+      }
+    }
+    return null;
+  }
+};
 
 const Agent = {
   MAX_ROUNDS: 20,           // hard cap on tool-call rounds per request
@@ -20,9 +93,8 @@ const Agent = {
    *
    * @param {object} opts
    * @param {string} opts.userText
-   * @param {Array}  opts.conversation  — App.conversation (mutated in place)
+   * @param {Array}  opts.conversation  — App.conversation (mutated in place, OpenAI messages format)
    * @param {AbortSignal} [opts.signal] — for Stop button
-   * @param {function} opts.onThinking  — (chunk, full) live reasoning
    * @param {function} opts.onText      — (chunk, full) live final text
    * @param {function} opts.onToolStart — (callId, name, args) before dispatch
    * @param {function} opts.onToolEnd   — (callId, name, result) after dispatch
@@ -35,11 +107,10 @@ const Agent = {
   async run(opts) {
     const {
       userText, conversation, signal,
-      onThinking, onText, onToolStart, onToolEnd, onToolError, onRound
+      onText, onToolStart, onToolEnd, onToolError, onRound
     } = opts;
 
     Journal.beginRequest();
-    Config.resetRotation(); // start each user request at key pool index 0
 
     const systemPrompt = Prompt.build();
     const tools = Tools.declarations();
@@ -49,6 +120,10 @@ const Agent = {
     let finalText = '';
     let aborted = false;
     const toolErrors = []; // collect all tool errors to surface to the user
+
+    // Smart routing: pick the initial model based on request complexity.
+    let currentModel = Router.classify(userText);
+    console.log(`Router: using ${currentModel} for this request`);
 
     // Auto-continue state: when the model hits MAX_TOKENS, the response is
     // truncated mid-sentence. We save the partial text, push it to history,
@@ -60,12 +135,11 @@ const Agent = {
       if (signal && signal.aborted) { aborted = true; break; }
       if (onRound) onRound(round, this.MAX_ROUNDS);
 
-      const result = await Gemini.generateWithFallback({
+      const result = await Groq.generateWithFallback({
         systemPrompt,
-        contents: conversation,
+        messages: conversation,
         tools,
-        toolConfig: { functionCallingConfig: { mode: 'AUTO' } },
-        onThinking,
+        model: currentModel,
         onText: (chunk, full) => {
           // Prepend any text from previous truncated segments so the UI
           // shows the complete answer as it streams in.
@@ -96,11 +170,11 @@ const Agent = {
         // by asking the model to resume from where it stopped, up to a cap.
         if (result.finishReason === 'MAX_TOKENS' && continuationsUsed < this.MAX_CONTINUATIONS && result.text) {
           continuationBase = finalText; // save accumulated text so far
-          conversation.push({ role: 'model', parts: result.rawParts });
-          conversation.push({ role: 'user', parts: [{ text: I18n.lang === 'es'
+          conversation.push(result.message);
+          conversation.push({ role: 'user', content: I18n.lang === 'es'
             ? 'Continúa tu respuesta anterior exactamente desde donde se detuvo. No repitas lo que ya dijiste.'
             : 'Continue your previous response exactly from where it stopped. Do not repeat what you already said.'
-          }] });
+          });
           continuationsUsed++;
           continue; // next round calls generateWithFallback again
         }
@@ -122,14 +196,18 @@ const Agent = {
       // reset the continuation base (any partial text is already in history).
       continuationBase = '';
 
-      // Append the model turn to history using the RAW parts from the API
-      // response. This preserves thoughtSignature at the Part level, which
-      // Gemini 3 requires — reconstructing parts manually drops the signature
-      // and causes HTTP 400 on the next turn.
-      conversation.push({ role: 'model', parts: result.rawParts });
+      // Smart routing: check if we should upgrade to the capable model
+      // for the next round based on the tools being called.
+      const upgrade = Router.shouldUpgrade(currentModel, result.functionCalls);
+      if (upgrade) {
+        console.log(`Router: upgrading from ${currentModel} to ${upgrade} (complex tools detected)`);
+        currentModel = upgrade;
+      }
+
+      // Append the assistant message (with tool_calls) to history.
+      conversation.push(result.message);
 
       // Dispatch each function call and collect responses.
-      const responseParts = [];
       for (let i = 0; i < result.functionCalls.length; i++) {
         if (signal && signal.aborted) { aborted = true; break; }
 
@@ -155,21 +233,23 @@ const Agent = {
           lastErrorTool = null;
         }
 
-        // Gemini expects functionResponse.name to match the call name, and
-        // response to be a JSON object.
-        responseParts.push({
-          functionResponse: {
-            name: fc.name,
-            response: toolResult.ok
-              ? { ok: true, ...toolResult.result }
-              : { ok: false, error: toolResult.error }
-          }
+        // OpenAI format: tool response is a message with role "tool",
+        // tool_call_id matching the call, and content as a JSON string.
+        const toolResponseContent = toolResult.ok
+          ? JSON.stringify({ ok: true, ...toolResult.result })
+          : JSON.stringify({ ok: false, error: toolResult.error });
+
+        conversation.push({
+          role: 'tool',
+          tool_call_id: fc.id,
+          content: toolResponseContent
         });
 
         if (consecutiveErrors >= this.MAX_CONSECUTIVE_ERRORS) {
           // Tell the model to stop retrying this tool and explain.
-          responseParts.push({
-            text: I18n.lang === 'es'
+          conversation.push({
+            role: 'user',
+            content: I18n.lang === 'es'
               ? `SYSTEM: La herramienta "${fc.name}" ha fallado ${consecutiveErrors} veces consecutivas con error: ${toolResult.error}. Deja de intentar esta herramienta y responde al usuario en texto explicando el problema y qué información necesitas para continuar.`
               : `SYSTEM: Tool "${fc.name}" has failed ${consecutiveErrors} consecutive times with error: ${toolResult.error}. Stop trying this tool and respond to the user in text explaining the problem and what information you need to continue.`
           });
@@ -179,9 +259,6 @@ const Agent = {
       }
 
       if (aborted) break;
-
-      // Push the function responses as a user turn (Gemini convention).
-      conversation.push({ role: 'user', parts: responseParts });
 
       // Trim large tool results in older history to control context growth.
       this.trimHistory(conversation);
@@ -225,8 +302,8 @@ const Agent = {
       }
     }
 
-    // Append the final text answer to conversation history as a model turn.
-    conversation.push({ role: 'model', parts: [{ text: finalText }] });
+    // Append the final text answer to conversation history as an assistant message.
+    conversation.push({ role: 'assistant', content: finalText });
 
     return {
       ok: true,
@@ -239,46 +316,49 @@ const Agent = {
   },
 
   /**
-   * Trim large data payloads from old tool responses to keep context bounded.
-   * Keeps the most recent 6 turns intact; older functionResponse.result.data
-   * arrays are replaced with a summary string.
+   * Trim large data payloads from old tool response messages to keep context
+   * bounded. Keeps the most recent 3 turns intact; older tool messages get
+   * their large content payloads replaced with compact summaries.
    */
   trimHistory(conversation) {
-    // Aggressive trimming: keep only the last 3 turns full. Older turns
-    // get their large payloads replaced with compact summaries to save
-    // input tokens (and thus quota) on subsequent API calls.
-    const TURNS_KEPT_FULL = 3;
+    const TURNS_KEPT_FULL = 6;
     for (let i = 0; i < conversation.length - TURNS_KEPT_FULL; i++) {
-      const turn = conversation[i];
-      if (!turn || !turn.parts) continue;
-      for (const part of turn.parts) {
-        if (part.functionResponse && part.functionResponse.response) {
-          const r = part.functionResponse.response;
-          // Replace large arrays with a size note.
-          if (Array.isArray(r.data)) {
-            const rows = r.data.length;
-            const cols = rows > 0 && Array.isArray(r.data[0]) ? r.data[0].length : 0;
-            r.data = `[${rows}x${cols} array omitted to save context]`;
-          }
-          if (Array.isArray(r.sample)) {
-            r.sample = `[${r.sample.length}x sample omitted]`;
-          }
-          if (Array.isArray(r.matches)) {
-            r.matches = `[${r.matches.length} matches omitted]`;
-          }
-          // Trim the overview string — it's the single largest payload
-          // (all sheets, headers, stats, sample rows). Replace with a
-          // compact note so the model knows it saw the overview but
-          // doesn't resend thousands of tokens every round.
-          if (typeof r.overview === 'string' && r.overview.length > 200) {
-            const sheetCount = r.sheets ? r.sheets.length : '?';
-            r.overview = `[workbook overview omitted to save context - ${sheetCount} sheets. Call get_workbook_overview again if you need details.]`;
-          }
-          // Trim the sheets array from old overview responses.
-          if (Array.isArray(r.sheets) && r.sheets.length > 0) {
-            r.sheets = `[${r.sheets.length} sheet names omitted]`;
-          }
+      const msg = conversation[i];
+      if (!msg || msg.role !== 'tool') continue;
+      try {
+        const r = JSON.parse(msg.content);
+        let modified = false;
+        // Replace large arrays with a size note.
+        if (Array.isArray(r.data)) {
+          const rows = r.data.length;
+          const cols = rows > 0 && Array.isArray(r.data[0]) ? r.data[0].length : 0;
+          r.data = `[${rows}x${cols} array omitted to save context]`;
+          modified = true;
         }
+        if (Array.isArray(r.sample)) {
+          r.sample = `[${r.sample.length}x sample omitted]`;
+          modified = true;
+        }
+        if (Array.isArray(r.matches)) {
+          r.matches = `[${r.matches.length} matches omitted]`;
+          modified = true;
+        }
+        // Trim the overview string — it's the single largest payload.
+        if (typeof r.overview === 'string' && r.overview.length > 200) {
+          const sheetCount = r.sheets ? r.sheets.length : '?';
+          r.overview = `[workbook overview omitted to save context - ${sheetCount} sheets. Call get_workbook_overview again if you need details.]`;
+          modified = true;
+        }
+        // Trim the sheets array from old overview responses.
+        if (Array.isArray(r.sheets) && r.sheets.length > 0) {
+          r.sheets = `[${r.sheets.length} sheet names omitted]`;
+          modified = true;
+        }
+        if (modified) {
+          msg.content = JSON.stringify(r);
+        }
+      } catch (e) {
+        // Not JSON or already trimmed — skip.
       }
     }
   }

@@ -1,50 +1,30 @@
 /* ============================================
    config.js — Settings & state management
-   Includes hardcoded API key pool with round-robin rotation.
+   API key via OpenRouter (preset + user-provided).
    ============================================ */
 
 const Config = {
   apiKey: '',
-  model: 'gemini-3.5-flash-lite',
-  fallbackModel: 'gemini-3.6-flash',
+  model: 'smart',              // 'smart' | 'groq/llama-3.3-70b-versatile' | 'groq/llama-3.1-8b-instant'
+  fastModel: 'groq/llama-3.1-8b-instant',
+  capableModel: 'groq/llama-3.3-70b-versatile',
 
-  // Hardcoded key pool — rotated round-robin on every Gemini request.
-  // If the user enters their own key in Settings, it's prepended to the
-  // pool so it's tried first, then we cycle through these.
-  // Stored base64-encoded to avoid plaintext exposure in the repo.
-  _encodedKeys: [
-    'QVEuQWI4Uk42SkNJOUZJZU9IQ2ZYZ2FCTGlmbnlrOHBPNHhjcWJnOHlHOUxJOTItRl9BdUE=',
-    'QVEuQWI4Uk42STVZZmJRbzZDY19fUll1T05hb2FiOHctWjFOOUttQnVLQnotSEQ2cmJzc1E='
-  ],
+  // Preset key — base64-encoded, loaded from gitignored preset-key.js
+  _presetKeyEncoded: (typeof PRESET_KEY !== 'undefined') ? PRESET_KEY : '',
 
-  get hardcodedKeys() {
-    return this._encodedKeys.map(k => {
-      try { return atob(k); } catch (e) { return ''; }
-    });
+  get presetKey() {
+    try { return atob(this._presetKeyEncoded); } catch (e) { return ''; }
   },
 
-  // Round-robin index into the key pool.
-  _keyIndex: 0,
-
-  // Models that have been deprecated — auto-migrate to current names
-  deprecatedModels: {
-    'gemini-2.5-flash': 'gemini-3.6-flash',
-    'gemini-2.5-flash-lite': 'gemini-3.5-flash-lite',
-    'gemini-2.0-flash': 'gemini-3.6-flash',
-    'gemini-2.0-flash-lite': 'gemini-3.5-flash-lite',
+  // Returns the active API key: user's key first, preset key as fallback.
+  get activeKey() {
+    return (this.apiKey && this.apiKey.length > 0) ? this.apiKey : this.presetKey;
   },
 
   load() {
     try {
-      this.apiKey = localStorage.getItem('gemini_api_key') || '';
-      let savedModel = localStorage.getItem('gemini_model');
-      // Auto-migrate deprecated model names
-      if (savedModel && this.deprecatedModels[savedModel]) {
-        console.log('Migrating deprecated model:', savedModel, '->', this.deprecatedModels[savedModel]);
-        savedModel = this.deprecatedModels[savedModel];
-        localStorage.setItem('gemini_model', savedModel);
-      }
-      this.model = savedModel || 'gemini-3.5-flash-lite';
+      this.apiKey = localStorage.getItem('openrouter_api_key') || '';
+      this.model = localStorage.getItem('groq_model') || 'smart';
     } catch (e) {
       console.warn('Config load failed:', e);
     }
@@ -52,77 +32,25 @@ const Config = {
 
   save() {
     try {
-      localStorage.setItem('gemini_api_key', this.apiKey);
-      localStorage.setItem('gemini_model', this.model);
+      localStorage.setItem('openrouter_api_key', this.apiKey);
+      localStorage.setItem('groq_model', this.model);
     } catch (e) {
       console.warn('Config save failed:', e);
     }
   },
 
   hasApiKey() {
-    // We always have keys available (hardcoded pool), so this is always true.
-    // Kept for compatibility with the UI gating logic.
-    return true;
-  },
-
-  /**
-   * Build the key pool: user's key first (if set), then hardcoded keys.
-   * @returns {string[]}
-   */
-  keyPool() {
-    const pool = [];
-    if (this.apiKey && this.apiKey.length > 0) {
-      pool.push(this.apiKey);
-    }
-    for (const k of this.hardcodedKeys) {
-      if (k && !pool.includes(k)) pool.push(k);
-    }
-    return pool;
-  },
-
-  /**
-   * Get the next API key (round-robin). Advances the index so the next
-   * call uses a different key, distributing load across the pool.
-   * @returns {string}
-   */
-  nextKey() {
-    const pool = this.keyPool();
-    if (pool.length === 0) return '';
-    const key = pool[this._keyIndex % pool.length];
-    this._keyIndex = (this._keyIndex + 1) % pool.length;
-    return key;
-  },
-
-  /**
-   * Get the next HARDCODED key only (round-robin), skipping the user's key.
-   * Used after the user's own key has been exhausted (429) or invalidated
-   * (400/403) during a request, so we fall back to the built-in pool.
-   * @returns {string}
-   */
-  nextHardcodedKey() {
-    const pool = this.hardcodedKeys.filter(k => k);
-    if (pool.length === 0) return '';
-    const key = pool[this._keyIndex % pool.length];
-    this._keyIndex = (this._keyIndex + 1) % pool.length;
-    return key;
+    return !!(this.activeKey && this.activeKey.length > 0);
   },
 
   /**
    * Clear the user's API key from memory, localStorage, and the Settings UI.
-   * Called when the user's key returns 400/403 (invalid/disabled).
    */
   clearUserKey() {
     this.apiKey = '';
-    try { localStorage.removeItem('gemini_api_key'); } catch (e) {}
+    try { localStorage.removeItem('openrouter_api_key'); } catch (e) {}
     if (typeof App !== 'undefined' && App.el && App.el.apiKeyInput) {
       App.el.apiKeyInput.value = '';
     }
-  },
-
-  /**
-   * Reset the rotation index (e.g. at the start of a new user request).
-   */
-  resetRotation() {
-    this._keyIndex = 0;
   }
 };

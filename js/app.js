@@ -6,7 +6,7 @@
    ============================================ */
 
 const App = {
-  conversation: [],   // Gemini contents format
+  conversation: [],   // OpenAI messages format
   isRunning: false,
   lastUserText: '',   // for manual retry
   abortController: null, // for Stop button
@@ -135,7 +135,7 @@ const App = {
     this._hasWrittenThisRun = false;
 
     this.addMessage('user', text);
-    this.conversation.push({ role: 'user', parts: [{ text }] });
+    this.conversation.push({ role: 'user', content: text });
 
     this.abortController = new AbortController();
 
@@ -147,7 +147,6 @@ const App = {
         userText: text,
         conversation: this.conversation,
         signal: this.abortController.signal,
-        onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
         onToolStart: (callId, name, args) => {
           this.addToolRow(activityEl, callId, name, args);
@@ -166,7 +165,7 @@ const App = {
 
       if (!result.ok) {
         this.updateRunStatus(activityEl, 'error');
-        this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
+        this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
       } else {
         this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
         // Render the final answer as a proper message (with undo if sealed).
@@ -205,7 +204,6 @@ const App = {
         userText: this.lastUserText,
         conversation: this.conversation,
         signal: this.abortController.signal,
-        onThinking: (chunk, full) => this.updateLiveThinking(activityEl, full),
         onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
         onToolStart: (callId, name, args) => {
           this.addToolRow(activityEl, callId, name, args);
@@ -222,7 +220,7 @@ const App = {
       this.finalizeLiveAnswer(activityEl);
       if (!result.ok) {
         this.updateRunStatus(activityEl, 'error');
-        this.addErrorMessageWithRetry(`${I18n.t('geminiError')}: ${result.error}`);
+        this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
       } else {
         this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
         this.addFinalMessage(result.finalText, result.sealed, result.aborted);
