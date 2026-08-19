@@ -63,6 +63,7 @@ const Groq = {
       }
 
       const apiKey = Config.activeKey;
+      console.log(`Groq: activeKey length=${apiKey ? apiKey.length : 0}, apiKey starts with=${apiKey ? apiKey.substring(0, 8) : 'none'}`);
       if (!apiKey) {
         return { ok: false, error: 'No API key configured. Open Settings and enter your Groq API key.', errorType: 'client', retry: false };
       }
@@ -113,7 +114,7 @@ const Groq = {
           console.log(`${resp.status} auth error: ${this.truncate(errText, 300)}`);
           return {
             ok: false,
-            error: `Authentication failed (${resp.status}). Check your Groq API key in Settings. ${this.truncate(errText, 200)}`,
+            error: `Authentication failed (${resp.status}). Check your API key in Settings. ${this.truncate(errText, 200)}`,
             errorType: 'client',
             retry: false
           };

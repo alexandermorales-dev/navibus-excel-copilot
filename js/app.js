@@ -48,11 +48,14 @@ const App = {
       this.el.settingsPanel.classList.toggle('hidden');
     });
 
-    this.el.apiKeyInput.addEventListener('change', () => {
+    const updateApiKey = () => {
       Config.apiKey = this.el.apiKeyInput.value.trim();
       Config.save();
       this.updateSendButton();
-    });
+    };
+    this.el.apiKeyInput.addEventListener('change', updateApiKey);
+    this.el.apiKeyInput.addEventListener('input', updateApiKey);
+    this.el.apiKeyInput.addEventListener('blur', updateApiKey);
 
     this.el.apiKeyToggle.addEventListener('click', () => {
       const input = this.el.apiKeyInput;

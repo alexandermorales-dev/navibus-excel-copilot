@@ -10,7 +10,9 @@ const Config = {
   capableModel: 'groq/llama-3.3-70b-versatile',
 
   // Preset key — base64-encoded, loaded from gitignored preset-key.js
-  _presetKeyEncoded: (typeof PRESET_KEY !== 'undefined') ? PRESET_KEY : '',
+  get _presetKeyEncoded() {
+    return (typeof PRESET_KEY !== 'undefined') ? PRESET_KEY : '';
+  },
 
   get presetKey() {
     try { return atob(this._presetKeyEncoded); } catch (e) { return ''; }
