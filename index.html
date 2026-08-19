@@ -9,7 +9,7 @@
   <title>Excel AI Copilot</title>
   <!-- Office.js API from CDN -->
   <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=16" />
+  <link rel="stylesheet" href="css/style.css?v=17" />
 </head>
 <body>
   <div id="app">
@@ -46,6 +46,11 @@
         </div>
         <p class="settings-hint">Optional — a preset key is included. Get your own free key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></p>
         <p id="keyStatus" class="key-status"></p>
+      </div>
+      <div class="settings-row">
+        <label for="geminiKeyInput">Gemini API Key (Supervisor)</label>
+        <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off" />
+        <p class="settings-hint">Optional — enables AI supervisor that guides the agent. Free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></p>
       </div>
       <div class="settings-row">
         <label for="modelSelect">Model</label>
@@ -88,14 +93,15 @@
   </div>
 
   <!-- Scripts (cache-busted: change ?v= when updating) -->
-  <script src="js/config.js?v=33"></script>
-  <script src="js/i18n.js?v=32"></script>
-  <script src="js/groq.js?v=32"></script>
-  <script src="js/schema.js?v=32"></script>
-  <script src="js/journal.js?v=32"></script>
-  <script src="js/tools.js?v=32"></script>
-  <script src="js/prompt.js?v=34"></script>
+  <script src="js/config.js?v=35"></script>
+  <script src="js/i18n.js?v=35"></script>
+  <script src="js/groq.js?v=35"></script>
+  <script src="js/schema.js?v=35"></script>
+  <script src="js/journal.js?v=35"></script>
+  <script src="js/tools.js?v=35"></script>
+  <script src="js/prompt.js?v=35"></script>
+  <script src="js/supervisor.js?v=35"></script>
   <script src="js/agent.js?v=35"></script>
-  <script src="js/app.js?v=32"></script>
+  <script src="js/app.js?v=35"></script>
 </body>
 </html>

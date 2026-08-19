@@ -23,6 +23,7 @@ const App = {
       settingsPanel: document.getElementById('settingsPanel'),
       apiKeyInput: document.getElementById('apiKeyInput'),
       apiKeyToggle: document.getElementById('apiKeyToggle'),
+      geminiKeyInput: document.getElementById('geminiKeyInput'),
       keyStatus: document.getElementById('keyStatus'),
       modelSelect: document.getElementById('modelSelect'),
       clearChatBtn: document.getElementById('clearChatBtn'),
@@ -31,6 +32,7 @@ const App = {
 
     Config.load();
     this.el.apiKeyInput.value = Config.apiKey;
+    this.el.geminiKeyInput.value = Config.geminiApiKey;
     this.el.modelSelect.value = Config.model;
     this.updateSendButton();
     this.updateStopButton();
@@ -59,6 +61,14 @@ const App = {
     this.el.apiKeyInput.addEventListener('change', updateApiKey);
     this.el.apiKeyInput.addEventListener('input', updateApiKey);
     this.el.apiKeyInput.addEventListener('blur', updateApiKey);
+
+    const updateGeminiKey = () => {
+      Config.geminiApiKey = this.el.geminiKeyInput.value.trim();
+      Config.save();
+    };
+    this.el.geminiKeyInput.addEventListener('change', updateGeminiKey);
+    this.el.geminiKeyInput.addEventListener('input', updateGeminiKey);
+    this.el.geminiKeyInput.addEventListener('blur', updateGeminiKey);
 
     this.el.apiKeyToggle.addEventListener('click', () => {
       const input = this.el.apiKeyInput;

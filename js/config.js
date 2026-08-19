@@ -5,7 +5,9 @@
 
 const Config = {
   apiKey: '',
+  geminiApiKey: '',
   _memoryKey: '',  // fallback when all storage is blocked
+  _geminiMemoryKey: '',
   model: 'smart',              // 'smart' | capable model | fast model
   fastModel: 'nvidia/nemotron-3-nano-30b-a3b:free',
   capableModel: 'nvidia/nemotron-3-super-120b-a12b:free',
@@ -78,12 +80,15 @@ const Config = {
 
   load() {
     this.apiKey = this._read('openrouter_api_key') || '';
+    this.geminiApiKey = this._read('gemini_api_key') || '';
     this.model = this._read('groq_model') || 'smart';
   },
 
   save() {
     this._memoryKey = this.apiKey;
+    this._geminiMemoryKey = this.geminiApiKey;
     this._write('openrouter_api_key', this.apiKey);
+    this._write('gemini_api_key', this.geminiApiKey);
     this._write('groq_model', this.model);
   },
 

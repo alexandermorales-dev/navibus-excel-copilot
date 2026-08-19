@@ -89,6 +89,7 @@ const Agent = {
   MAX_CONTINUATIONS: 3,     // auto-continue attempts when MAX_TOKENS truncates a response
   STALE_ROUNDS: 3,          // if no successful write after this many rounds, nudge the model
   REMINDER_ROUNDS: 4,       // re-inject original request to keep the model focused
+  SUPERVISOR_ROUNDS: 4,     // call Gemini supervisor every N rounds for guidance
 
   /**
    * Run the agent loop for one user message.
@@ -126,6 +127,7 @@ const Agent = {
     let roundsSinceWrite = 0;
     let lastRound = 0;  // track final round for post-loop summary
     const writeOps = []; // track what was actually written for summary
+    const actionLog = []; // compact log for supervisor (token-saving)
 
     // Smart routing: pick the initial model based on request complexity.
     let currentModel = Router.classify(userText);
@@ -235,6 +237,14 @@ const Agent = {
 
         if (onToolEnd) onToolEnd(callId, fc.name, toolResult);
 
+        // Record compact action for supervisor (saves tokens vs full output)
+        actionLog.push({
+          tool: fc.name,
+          detail: this._actionDetail(fc.name, fc.args),
+          ok: toolResult.ok,
+          error: toolResult.ok ? null : toolResult.error
+        });
+
         // Track successful write operations for stale detection and summary.
         if (toolResult.ok && COMPLEX_TOOLS.has(fc.name)) {
           writeSuccessCount++;
@@ -307,6 +317,31 @@ const Agent = {
             ? `SYSTEM: Recordatorio — la solicitud original del usuario era: "${userText}". Asegúrate de estar avanzando hacia ese objetivo, no explorando datos sin propósito.`
             : `SYSTEM: Reminder — the user's original request was: "${userText}". Make sure you are progressing toward that goal, not exploring data aimlessly.`
         });
+      }
+
+      // Supervisor: call Gemini every SUPERVISOR_ROUNDS to review progress
+      // and inject guidance. Only if a Gemini API key is configured.
+      if (round > 0 && round % this.SUPERVISOR_ROUNDS === 0 && round < this.MAX_ROUNDS && Config.geminiApiKey) {
+        try {
+          const guidance = await Supervisor.review({
+            userRequest: userText,
+            actions: actionLog,
+            round,
+            maxRounds: this.MAX_ROUNDS,
+            lang: I18n.lang
+          });
+          if (guidance) {
+            console.log(`Supervisor (round ${round}): ${guidance}`);
+            conversation.push({
+              role: 'user',
+              content: I18n.lang === 'es'
+                ? `SUPERVISOR: ${guidance}`
+                : `SUPERVISOR: ${guidance}`
+            });
+          }
+        } catch (e) {
+          console.warn('Supervisor call failed:', e.message);
+        }
       }
 
       // If the model also emitted final text alongside the calls, treat that
@@ -393,6 +428,35 @@ const Agent = {
       sealed,
       toolErrors
     };
+  },
+
+  /**
+   * Build a compact detail string for a tool call (for the supervisor log).
+   * This is intentionally short to save tokens — just the key args.
+   */
+  _actionDetail(name, args) {
+    const a = args || {};
+    switch (name) {
+      case 'get_workbook_overview': return '';
+      case 'read_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'find_in_workbook': return `"${a.query || ''}"`;
+      case 'get_objects': return a.sheet || '';
+      case 'write_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'format_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'clear_range': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'add_sheet': return a.name || '';
+      case 'delete_sheet': return a.name || '';
+      case 'create_table': return a.name || '';
+      case 'create_pivot': return a.name || '';
+      case 'create_chart': return a.title || a.type || '';
+      case 'add_slicer': return a.field || '';
+      case 'conditional_format': return `${a.sheet || ''}!${a.range || ''}`;
+      case 'autofit': return a.sheet || '';
+      case 'insert_rows_cols': return `${a.kind || ''} @${a.at || ''}`;
+      case 'delete_rows_cols': return `${a.kind || ''} @${a.at || ''}`;
+      case 'sort_range': return `${a.sheet || ''}!${a.range || ''}`;
+      default: return '';
+    }
   },
 
   /**
