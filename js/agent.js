@@ -114,7 +114,7 @@ const Agent = {
 
     Journal.beginRequest();
 
-    const systemPrompt = Prompt.build();
+    const systemPrompt = Prompt.build(userText);
     const tools = Tools.declarations();
     let toolCallCount = 0;
     let consecutiveErrors = 0;

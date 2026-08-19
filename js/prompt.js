@@ -7,8 +7,35 @@
    ============================================ */
 
 const Prompt = {
-  build() {
-    return I18n.lang === 'es' ? this.spanish() : this.english();
+  build(userText) {
+    // Detect language from the user's message, not just Office display lang.
+    // This ensures reasoning + responses match the language the user writes in.
+    const lang = this.detectLang(userText);
+    return lang === 'es' ? this.spanish() : this.english();
+  },
+
+  /**
+   * Simple language detection: check for Spanish characters/words.
+   * Falls back to Office display language if ambiguous.
+   */
+  detectLang(text) {
+    if (!text) return I18n.lang;
+    const lower = text.toLowerCase();
+    // Strong Spanish indicators
+    const esMarkers = ['ñ', 'á', 'é', 'í', 'ó', 'ú', '¿', '¡',
+      ' que ', ' de ', ' del ', ' la ', ' el ', ' los ', ' las ',
+      ' y ', ' o ', ' en ', ' con ', ' por ', ' para ', ' una ',
+      ' creo', ' crea', ' crear', ' hazme', ' haz ', ' dame ',
+      ' informe', ' panel', ' tabla', ' gráfico', ' grafico',
+      ' hoja', ' celda', ' formula', ' fórmula', ' dato', ' datos',
+      ' analizar', ' análisis', ' analisis', ' total', ' promedio',
+      ' gracias', ' por favor', ' ayuda', ' continua', ' continúa'];
+    let esScore = 0;
+    for (const m of esMarkers) {
+      if (lower.includes(m)) esScore++;
+    }
+    // 2+ Spanish markers → Spanish; otherwise use Office display lang
+    return esScore >= 2 ? 'es' : I18n.lang;
   },
 
   spanish() {
