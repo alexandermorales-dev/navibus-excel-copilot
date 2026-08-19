@@ -764,6 +764,35 @@ body {
   flex-direction: column;
   gap: 4px;
   margin: 6px 0;
+  max-height: 500px;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.activity-feed-collapsed {
+  max-height: 0 !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+}
+
+/* Activity summary (subtle clickable line after completion) */
+.activity-summary {
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 3px 0;
+  cursor: pointer;
+  user-select: none;
+  transition: color 0.15s;
+}
+
+.activity-summary:hover {
+  color: var(--text-secondary);
+}
+
+.activity-summary::before {
+  content: '\25B8';
+  margin-right: 4px;
+  font-size: 10px;
 }
 
 .tool-row {
@@ -785,6 +814,12 @@ body {
   background: rgba(244, 67, 54, 0.08);
 }
 
+.tool-row-warn {
+  border-color: rgba(255, 152, 0, 0.15);
+  background: rgba(255, 152, 0, 0.03);
+  opacity: 0.65;
+}
+
 .tool-spinner {
   flex-shrink: 0;
   width: 12px;
@@ -799,7 +834,7 @@ body {
   to { transform: rotate(360deg); }
 }
 
-.tool-ok, .tool-fail {
+.tool-ok, .tool-fail, .tool-warn {
   flex-shrink: 0;
   width: 14px;
   height: 14px;
@@ -813,6 +848,7 @@ body {
 
 .tool-ok { color: var(--success); }
 .tool-fail { color: var(--error); }
+.tool-warn { color: var(--text-muted); }
 
 .tool-label {
   color: var(--text-primary);
@@ -874,8 +910,13 @@ body {
   word-wrap: break-word;
 }
 
+/* Promoted live answer: clean, no box, natural message flow */
 .live-answer-done {
-  border-color: rgba(0, 168, 204, 0.3);
+  background: transparent;
+  border: none;
+  padding: 4px 0 0 0;
+  margin-top: 4px;
+  white-space: normal;
 }
 
 /* Final answer (standalone message after the run) */

@@ -164,19 +164,25 @@ const App = {
       });
 
       this.finalizeLiveThinking(activityEl);
-      this.finalizeLiveAnswer(activityEl);
 
       if (!result.ok) {
         this.updateRunStatus(activityEl, 'error');
+        this.finalizeLiveAnswer(activityEl);
         this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
       } else {
         this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
-        // Render the final answer as a proper message (with undo if sealed).
-        this.addFinalMessage(result.finalText, result.sealed, result.aborted);
+        this.collapseActivityFeed(activityEl);
+        this.finalizeLiveAnswer(activityEl, result.sealed && !result.aborted);
+        const ansEl = activityEl.querySelector('.live-answer');
+        if ((!ansEl || ansEl.classList.contains('hidden')) && result.finalText) {
+          this.addFinalMessage(result.finalText, result.sealed, result.aborted);
+        }
       }
     } catch (e) {
       this.finalizeLiveThinking(activityEl);
       this.updateRunStatus(activityEl, 'error');
+      this.collapseActivityFeed(activityEl);
+      this.finalizeLiveAnswer(activityEl);
       this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
@@ -220,17 +226,24 @@ const App = {
         }
       });
       this.finalizeLiveThinking(activityEl);
-      this.finalizeLiveAnswer(activityEl);
       if (!result.ok) {
         this.updateRunStatus(activityEl, 'error');
+        this.finalizeLiveAnswer(activityEl);
         this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
       } else {
         this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
-        this.addFinalMessage(result.finalText, result.sealed, result.aborted);
+        this.collapseActivityFeed(activityEl);
+        this.finalizeLiveAnswer(activityEl, result.sealed && !result.aborted);
+        const ansEl = activityEl.querySelector('.live-answer');
+        if ((!ansEl || ansEl.classList.contains('hidden')) && result.finalText) {
+          this.addFinalMessage(result.finalText, result.sealed, result.aborted);
+        }
       }
     } catch (e) {
       this.finalizeLiveThinking(activityEl);
       this.updateRunStatus(activityEl, 'error');
+      this.collapseActivityFeed(activityEl);
+      this.finalizeLiveAnswer(activityEl);
       this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
@@ -254,15 +267,8 @@ const App = {
           <span class="run-status-text">${this.escapeHtml(I18n.t('statusThinking'))}</span>
           <span class="run-status-count"></span>
         </div>
-        <div class="thinking-block thinking-live">
-          <div class="thinking-header">
-            <span class="thinking-icon">\u{1F4AD}</span>
-            <span class="thinking-label">${this.escapeHtml(I18n.t('reasoning'))}</span>
-            <span class="thinking-dots"><span></span><span></span><span></span></span>
-          </div>
-          <div class="thinking-text thinking-stream"></div>
-        </div>
         <div class="activity-feed"></div>
+        <div class="activity-summary hidden"></div>
         <div class="live-answer hidden"></div>
       </div>
     `;
@@ -331,21 +337,29 @@ const App = {
     const ansEl = activityEl.querySelector('.live-answer');
     if (ansEl) {
       ansEl.classList.remove('hidden');
+      ansEl._rawText = fullText;
       ansEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
     }
     this.scrollToBottom();
   },
 
-  finalizeLiveAnswer(activityEl) {
+  finalizeLiveAnswer(activityEl, addUndo = false) {
     if (!activityEl) return;
     const ansEl = activityEl.querySelector('.live-answer');
     if (ansEl && ansEl.classList.contains('hidden')) {
-      // No live answer was streamed (e.g. agent ended via tool round with no text).
-      // The final message will be added separately; hide this placeholder.
       ansEl.remove();
     } else if (ansEl) {
-      // Promote the live answer to a finalized styled block.
-      ansEl.classList.add('live-answer-done');
+      ansEl.classList.add('live-answer-done', 'final-answer');
+      const rawText = ansEl._rawText || ansEl.textContent || '';
+      ansEl.innerHTML = this.formatMarkdown(rawText);
+      if (addUndo) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-undo';
+        btn.textContent = I18n.t('undo');
+        btn.addEventListener('click', () => this.undoLastRequest(btn));
+        ansEl.appendChild(btn);
+      }
     }
   },
 
@@ -370,38 +384,43 @@ const App = {
     const spinner = row.querySelector('.tool-spinner');
     if (spinner) {
       spinner.classList.remove('tool-spinner');
-      spinner.classList.add(toolResult.ok ? 'tool-ok' : 'tool-fail');
-      spinner.textContent = toolResult.ok ? '\u2713' : '\u2717';
-    }
-    if (!toolResult.ok) {
-      row.classList.add('tool-row-error');
-      const errSpan = document.createElement('span');
-      errSpan.className = 'tool-error';
-      errSpan.textContent = toolResult.error;
-      row.appendChild(errSpan);
+      if (toolResult.ok) {
+        spinner.classList.add('tool-ok');
+        spinner.textContent = '\u2713';
+      } else {
+        spinner.classList.add('tool-warn');
+        spinner.textContent = '\u26A0';
+        row.classList.add('tool-row-warn');
+      }
     }
     this.scrollToBottom();
   },
 
-  /**
-   * Show a prominent error banner when a tool fails, so the user is
-   * always aware that something went wrong — even if the model later
-   * self-corrects or omits the error from its final answer.
-   */
   showToolError(activityEl, toolName, error) {
-    if (!activityEl) return;
+    // Silently handled — the agent receives tool errors and can self-correct.
+  },
+
+  collapseActivityFeed(activityEl) {
     const feed = activityEl.querySelector('.activity-feed');
     if (!feed) return;
-    // Avoid duplicate banners for the same tool+error.
-    const existing = feed.querySelector('.tool-error-banner');
-    if (existing && existing.dataset.error === error) return;
-    const banner = document.createElement('div');
-    banner.className = 'tool-error-banner';
-    banner.dataset.error = error;
-    const label = I18n.toolLabel(toolName);
-    banner.innerHTML = `<span class="tool-error-icon">\u26A0</span><span><strong>${this.escapeHtml(label)}</strong>: ${this.escapeHtml(error)}</span>`;
-    feed.appendChild(banner);
-    this.scrollToBottom();
+    const rows = feed.querySelectorAll('.tool-row');
+    if (rows.length === 0) {
+      feed.style.display = 'none';
+      return;
+    }
+    const toolCount = rows.length;
+    const warnCount = feed.querySelectorAll('.tool-row-warn').length;
+    feed.classList.add('activity-feed-collapsed');
+    const summary = activityEl.querySelector('.activity-summary');
+    if (summary) {
+      summary.classList.remove('hidden');
+      const stepsLabel = I18n.lang === 'es' ? 'pasos completados' : 'steps completed';
+      const warnLabel = I18n.lang === 'es' ? 'con advertencias' : 'with warnings';
+      let label = `${toolCount} ${stepsLabel}`;
+      if (warnCount) label += ` \u00B7 ${warnCount} ${warnLabel}`;
+      summary.textContent = label;
+      summary.onclick = () => feed.classList.toggle('activity-feed-collapsed');
+    }
   },
 
   toolDetail(name, args) {
