@@ -124,6 +124,7 @@ const Agent = {
     const toolErrors = []; // collect all tool errors to surface to the user
     let writeSuccessCount = 0;
     let roundsSinceWrite = 0;
+    let lastRound = 0;  // track final round for post-loop summary
     const writeOps = []; // track what was actually written for summary
 
     // Smart routing: pick the initial model based on request complexity.
@@ -139,6 +140,7 @@ const Agent = {
     for (let round = 1; round <= this.MAX_ROUNDS; round++) {
       if (signal && signal.aborted) { aborted = true; break; }
       if (onRound) onRound(round, this.MAX_ROUNDS);
+      lastRound = round;
 
       const result = await Groq.generateWithFallback({
         systemPrompt,
@@ -365,7 +367,7 @@ const Agent = {
         }
 
         // If we hit the round limit, note it
-        if (round >= this.MAX_ROUNDS && !aborted) {
+        if (lastRound >= this.MAX_ROUNDS && !aborted) {
           finalText += es
             ? ' \u26A0 Se alcanzó el límite de rondas — el resultado puede estar incompleto. Puedes pedirme que continúe.'
             : ' \u26A0 Hit the round limit — the result may be incomplete. You can ask me to continue.';
