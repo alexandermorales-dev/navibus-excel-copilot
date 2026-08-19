@@ -6,9 +6,9 @@
 const Config = {
   apiKey: '',
   _memoryKey: '',  // fallback when localStorage is blocked
-  model: 'smart',              // 'smart' | 'groq/llama-3.3-70b-versatile' | 'groq/llama-3.1-8b-instant'
-  fastModel: 'groq/llama-3.1-8b-instant',
-  capableModel: 'groq/llama-3.3-70b-versatile',
+  model: 'smart',              // 'smart' | 'meta-llama/llama-3.3-70b-instruct:free' | 'meta-llama/llama-3.1-8b-instruct'
+  fastModel: 'meta-llama/llama-3.1-8b-instruct',
+  capableModel: 'meta-llama/llama-3.3-70b-instruct:free',
 
   // Preset key — char-code encoded to bypass secret scanning, decoded at runtime
   // (atob/base64 doesn't work reliably in Excel WebView)
