@@ -123,6 +123,7 @@ const Agent = {
     const toolErrors = []; // collect all tool errors to surface to the user
     let writeSuccessCount = 0;
     let roundsSinceWrite = 0;
+    const writeOps = []; // track what was actually written for summary
 
     // Smart routing: pick the initial model based on request complexity.
     let currentModel = Router.classify(userText);
@@ -190,9 +191,7 @@ const Agent = {
         // onText callback to continuationBase + full — don't overwrite it
         // with just result.text (the continuation piece alone).
         if (!continuationBase) {
-          finalText = result.text || (I18n.lang === 'es'
-            ? 'Listo.'
-            : 'Done.');
+          finalText = result.text || '';
         }
         // If continuationBase is set but result.text is empty, finalText
         // already holds the partial text from the onText callback.
@@ -232,10 +231,11 @@ const Agent = {
 
         if (onToolEnd) onToolEnd(callId, fc.name, toolResult);
 
-        // Track successful write operations for stale detection.
+        // Track successful write operations for stale detection and summary.
         if (toolResult.ok && COMPLEX_TOOLS.has(fc.name)) {
           writeSuccessCount++;
           roundsSinceWrite = 0;
+          writeOps.push({ name: fc.name, args: fc.args, round });
         }
 
         // Track consecutive errors per tool to bail on stuck loops.
@@ -313,11 +313,57 @@ const Agent = {
       };
     }
 
-    // If we hit the round budget without a final text, synthesize a note.
-    if (!finalText) {
-      finalText = I18n.lang === 'es'
-        ? `Alcancé el límite de ${this.MAX_ROUNDS} rondas de herramientas. Se completaron ${toolCallCount} llamadas a herramientas. Puedes pedirme que continúe o que verifique el resultado.`
-        : `I hit the limit of ${this.MAX_ROUNDS} tool rounds. ${toolCallCount} tool calls completed. You can ask me to continue or to verify the result.`;
+    // If the model returned no text (or just "Done"), construct a meaningful
+    // summary based on what was actually done during the run.
+    if (!finalText || finalText.trim().length < 5) {
+      if (writeOps.length === 0) {
+        finalText = I18n.lang === 'es'
+          ? 'No pude completar la operación. ' + (toolErrors.length > 0
+            ? `Encontré ${toolErrors.length} errores al intentar usar las herramientas. Intenta reformular tu solicitud o verifica que los datos existan.`
+            : 'No se realizaron cambios en el libro. Intenta reformular tu solicitud.')
+          : 'I could not complete the operation. ' + (toolErrors.length > 0
+            ? `I encountered ${toolErrors.length} errors while trying to use tools. Try rephrasing your request or verify the data exists.`
+            : 'No changes were made to the workbook. Try rephrasing your request.');
+      } else {
+        // Construct a summary of what was built
+        const sheets = writeOps.filter(o => o.name === 'add_sheet').map(o => o.args?.name).filter(Boolean);
+        const writes = writeOps.filter(o => o.name === 'write_range').length;
+        const formats = writeOps.filter(o => o.name === 'format_range').length;
+        const charts = writeOps.filter(o => o.name === 'create_chart').length;
+        const tables = writeOps.filter(o => o.name === 'create_table').length;
+        const pivots = writeOps.filter(o => o.name === 'create_pivot').length;
+
+        const parts = [];
+        if (sheets.length) parts.push(sheets.length === 1 ? `hoja "${sheets[0]}"` : `hojas: ${sheets.join(', ')}`);
+        if (writes) parts.push(`${writes} escrituras`);
+        if (formats) parts.push(`${formats} formatos`);
+        if (charts) parts.push(`${charts} gráficos`);
+        if (tables) parts.push(`${tables} tablas`);
+        if (pivots) parts.push(`${pivots} tablas dinámicas`);
+
+        const es = I18n.lang === 'es';
+        if (parts.length > 0) {
+          finalText = es
+            ? `Completé la operación: ${parts.join(', ')}. `
+            : `Completed: ${parts.map(p => p.replace('escrituras','writes').replace('formatos','formats').replace('gráficos','charts').replace('tablas','tables').replace('tablas dinámicas','pivot tables')).join(', ')}. `;
+        } else {
+          finalText = es ? 'Operación completada.' : 'Operation completed.';
+        }
+
+        // If we hit the round limit, note it
+        if (round >= this.MAX_ROUNDS && !aborted) {
+          finalText += es
+            ? ' \u26A0 Se alcanzó el límite de rondas — el resultado puede estar incompleto. Puedes pedirme que continúe.'
+            : ' \u26A0 Hit the round limit — the result may be incomplete. You can ask me to continue.';
+        }
+
+        // If there were errors, mention count
+        if (toolErrors.length > 0) {
+          finalText += es
+            ? ` \u26A0 ${toolErrors.length} herramientas fallaron durante la construcción.`
+            : ` \u26A0 ${toolErrors.length} tools failed during the build.`;
+        }
+      }
     }
 
     // Append the final text answer to conversation history as an assistant message.

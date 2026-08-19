@@ -6,9 +6,9 @@
 const Config = {
   apiKey: '',
   _memoryKey: '',  // fallback when localStorage is blocked
-  model: 'smart',              // 'smart' | 'dots-studio/dots-3-note-preview:free' | 'nvidia/nemotron-3.5-lightning:free'
-  fastModel: 'nvidia/nemotron-3.5-lightning:free',
-  capableModel: 'dots-studio/dots-3-note-preview:free',
+  model: 'smart',              // 'smart' | capable model | fast model
+  fastModel: 'nvidia/nemotron-3-nano-30b-a3b:free',
+  capableModel: 'nvidia/nemotron-3-super-120b-a12b:free',
 
   // Preset key — char-code encoded to bypass secret scanning, decoded at runtime
   // (atob/base64 doesn't work reliably in Excel WebView)
