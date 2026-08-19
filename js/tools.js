@@ -559,10 +559,20 @@ const Tools = {
 
       const hasFormulas = normalized.some(row => Array.isArray(row) && row.some(v => typeof v === 'string' && v.startsWith('=')));
 
+      // Office.js requires formulas to be a 2D array of strings only.
+      // Convert null/number/boolean to strings; formula cells pass through.
+      const formulaMatrix = hasFormulas
+        ? normalized.map(row => row.map(v => {
+            if (v === null || v === undefined) return '';
+            if (typeof v === 'string') return v;
+            return String(v);
+          }))
+        : null;
+
       const post = await Excel.run(async (ctx) => {
         const s = ctx.workbook.worksheets.getItem(sheet);
         const r = s.getRange(fullRange);
-        if (hasFormulas) r.formulas = normalized;
+        if (hasFormulas) r.formulas = formulaMatrix;
         else r.values = normalized;
         if (numberFormat) r.numberFormat = numberFormat;
         // Read back a sample to surface formula errors.
@@ -586,20 +596,27 @@ const Tools = {
         const range = s.getRange(action.range);
         const fmt = range.format;
 
-        if (action.bold !== undefined) fmt.font.bold = action.bold;
-        if (action.italic !== undefined) fmt.font.italic = action.italic;
-        if (action.fontSize !== undefined) fmt.font.size = action.fontSize;
-        if (action.fontName !== undefined) fmt.font.name = action.fontName;
-        if (action.fontColor !== undefined) fmt.font.color = Tools.sanitizeColor(action.fontColor);
-        if (action.fillColor !== undefined) fmt.fill.color = Tools.sanitizeColor(action.fillColor);
-        if (action.horizontalAlignment !== undefined) fmt.horizontalAlignment = action.horizontalAlignment;
-        if (action.verticalAlignment !== undefined) fmt.verticalAlignment = action.verticalAlignment;
-        if (action.wrapText !== undefined) fmt.wrapText = action.wrapText;
-        if (action.numberFormat !== undefined) range.numberFormat = action.numberFormat;
-        if (action.columnWidth !== undefined) fmt.columnWidth = action.columnWidth;
-        if (action.rowHeight !== undefined) fmt.rowHeight = action.rowHeight;
-        if (action.merge) range.merge(true);
-        if (action.borders) Tools.applyBorders(ctx, range, action.borders);
+        const safeSet = (setter) => { try { setter(); } catch (e) { /* skip invalid arg */ } };
+        if (action.bold !== undefined) safeSet(() => fmt.font.bold = action.bold);
+        if (action.italic !== undefined) safeSet(() => fmt.font.italic = action.italic);
+        if (action.fontSize !== undefined && typeof action.fontSize === 'number') safeSet(() => fmt.font.size = action.fontSize);
+        if (action.fontName !== undefined && typeof action.fontName === 'string') safeSet(() => fmt.font.name = action.fontName);
+        if (action.fontColor !== undefined) {
+          const sc = Tools.sanitizeColor(action.fontColor);
+          if (sc) safeSet(() => fmt.font.color = sc);
+        }
+        if (action.fillColor !== undefined) {
+          const sc = Tools.sanitizeColor(action.fillColor);
+          if (sc) safeSet(() => fmt.fill.color = sc);
+        }
+        if (action.horizontalAlignment !== undefined) safeSet(() => fmt.horizontalAlignment = action.horizontalAlignment);
+        if (action.verticalAlignment !== undefined) safeSet(() => fmt.verticalAlignment = action.verticalAlignment);
+        if (action.wrapText !== undefined) safeSet(() => fmt.wrapText = action.wrapText);
+        if (action.numberFormat !== undefined && typeof action.numberFormat === 'string') safeSet(() => range.numberFormat = action.numberFormat);
+        if (action.columnWidth !== undefined && typeof action.columnWidth === 'number' && action.columnWidth > 0) safeSet(() => fmt.columnWidth = action.columnWidth);
+        if (action.rowHeight !== undefined && typeof action.rowHeight === 'number' && action.rowHeight > 0) safeSet(() => fmt.rowHeight = action.rowHeight);
+        if (action.merge) safeSet(() => range.merge(true));
+        if (action.borders) safeSet(() => Tools.applyBorders(ctx, range, action.borders));
         await ctx.sync();
       });
       return { ok: true, result: { sheet: action.sheet, range: action.range } };
@@ -848,11 +865,16 @@ const Tools = {
      HELPERS
      ---------------------------------------------------------- */
   sanitizeColor(c) {
-    if (!c) return c;
-    if (typeof c !== 'string') return c;
+    if (!c || typeof c !== 'string') return null;
     if (/^#[0-9a-fA-F]{6}$/.test(c)) return c;
     if (/^[0-9a-fA-F]{6}$/.test(c)) return '#' + c;
-    return c;
+    if (/^#[0-9a-fA-F]{3}$/.test(c)) {
+      return '#' + c[1] + c[1] + c[2] + c[2] + c[3] + c[3];
+    }
+    if (/^[0-9a-fA-F]{3}$/.test(c)) {
+      return '#' + c[0] + c[0] + c[1] + c[1] + c[2] + c[2];
+    }
+    return null;
   },
 
   mapAggregation(agg) {
