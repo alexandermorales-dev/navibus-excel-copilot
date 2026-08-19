@@ -8,7 +8,7 @@ const Config = {
   _memoryKey: '',  // fallback when localStorage is blocked
   model: 'smart',              // 'smart' | 'meta-llama/llama-3.3-70b-instruct:free' | 'meta-llama/llama-3.1-8b-instruct'
   fastModel: 'meta-llama/llama-3.1-8b-instruct',
-  capableModel: 'meta-llama/llama-3.3-70b-instruct:free',
+  capableModel: 'meta-llama/llama-3.3-70b-instruct',
 
   // Preset key — char-code encoded to bypass secret scanning, decoded at runtime
   // (atob/base64 doesn't work reliably in Excel WebView)
