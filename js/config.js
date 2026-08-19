@@ -5,7 +5,7 @@
 
 const Config = {
   apiKey: '',
-  _memoryKey: '',  // fallback when localStorage is blocked
+  _memoryKey: '',  // fallback when all storage is blocked
   model: 'smart',              // 'smart' | capable model | fast model
   fastModel: 'nvidia/nemotron-3-nano-30b-a3b:free',
   capableModel: 'nvidia/nemotron-3-super-120b-a12b:free',
@@ -28,23 +28,63 @@ const Config = {
     return key;
   },
 
-  load() {
+  /**
+   * Read a value from the most persistent storage available.
+   * Priority: Office roamingSettings > localStorage > null.
+   * roamingSettings persists across sessions per user in Excel.
+   */
+  _read(key) {
+    // Try Office.js roamingSettings first (survives relaunch)
     try {
-      this.apiKey = localStorage.getItem('openrouter_api_key') || '';
-      this.model = localStorage.getItem('groq_model') || 'smart';
+      if (typeof Office !== 'undefined' && Office.context && Office.context.roamingSettings) {
+        const val = Office.context.roamingSettings.get(key);
+        if (val) return val;
+      }
+    } catch (e) { /* roamingSettings not available */ }
+    // Fallback to localStorage (cleared on relaunch in some WebViews)
+    try {
+      return localStorage.getItem(key) || null;
     } catch (e) {
-      console.warn('Config load failed:', e);
+      return null;
     }
+  },
+
+  /**
+   * Write a value to all available storage layers.
+   */
+  _write(key, value) {
+    try {
+      if (typeof Office !== 'undefined' && Office.context && Office.context.roamingSettings) {
+        Office.context.roamingSettings.set(key, value);
+        Office.context.roamingSettings.saveAsync();
+      }
+    } catch (e) { /* roamingSettings not available */ }
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) { /* localStorage blocked */ }
+  },
+
+  _remove(key) {
+    try {
+      if (typeof Office !== 'undefined' && Office.context && Office.context.roamingSettings) {
+        Office.context.roamingSettings.remove(key);
+        Office.context.roamingSettings.saveAsync();
+      }
+    } catch (e) {}
+    try {
+      localStorage.removeItem(key);
+    } catch (e) {}
+  },
+
+  load() {
+    this.apiKey = this._read('openrouter_api_key') || '';
+    this.model = this._read('groq_model') || 'smart';
   },
 
   save() {
     this._memoryKey = this.apiKey;
-    try {
-      localStorage.setItem('openrouter_api_key', this.apiKey);
-      localStorage.setItem('groq_model', this.model);
-    } catch (e) {
-      console.warn('Config save failed (localStorage blocked), using in-memory fallback:', e);
-    }
+    this._write('openrouter_api_key', this.apiKey);
+    this._write('groq_model', this.model);
   },
 
   hasApiKey() {
@@ -63,11 +103,12 @@ const Config = {
   },
 
   /**
-   * Clear the user's API key from memory, localStorage, and the Settings UI.
+   * Clear the user's API key from memory, storage, and the Settings UI.
    */
   clearUserKey() {
     this.apiKey = '';
-    try { localStorage.removeItem('openrouter_api_key'); } catch (e) {}
+    this._memoryKey = '';
+    this._remove('openrouter_api_key');
     if (typeof App !== 'undefined' && App.el && App.el.apiKeyInput) {
       App.el.apiKeyInput.value = '';
     }
