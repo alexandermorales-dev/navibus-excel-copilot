@@ -84,9 +84,10 @@ const Router = {
 };
 
 const Agent = {
-  MAX_ROUNDS: 20,           // hard cap on tool-call rounds per request
+  MAX_ROUNDS: 15,           // hard cap on tool-call rounds per request
   MAX_CONSECUTIVE_ERRORS: 3,// bail if the same tool keeps failing
   MAX_CONTINUATIONS: 3,     // auto-continue attempts when MAX_TOKENS truncates a response
+  STALE_ROUNDS: 5,          // if no successful write after this many rounds, nudge the model
 
   /**
    * Run the agent loop for one user message.
@@ -120,6 +121,8 @@ const Agent = {
     let finalText = '';
     let aborted = false;
     const toolErrors = []; // collect all tool errors to surface to the user
+    let writeSuccessCount = 0;
+    let roundsSinceWrite = 0;
 
     // Smart routing: pick the initial model based on request complexity.
     let currentModel = Router.classify(userText);
@@ -229,6 +232,12 @@ const Agent = {
 
         if (onToolEnd) onToolEnd(callId, fc.name, toolResult);
 
+        // Track successful write operations for stale detection.
+        if (toolResult.ok && COMPLEX_TOOLS.has(fc.name)) {
+          writeSuccessCount++;
+          roundsSinceWrite = 0;
+        }
+
         // Track consecutive errors per tool to bail on stuck loops.
         if (!toolResult.ok) {
           if (lastErrorTool === fc.name) consecutiveErrors++;
@@ -270,6 +279,19 @@ const Agent = {
 
       // Trim large tool results in older history to control context growth.
       this.trimHistory(conversation);
+
+      // Stale detection: if the model has been reading for too many rounds
+      // without writing anything, nudge it to start building.
+      roundsSinceWrite++;
+      if (writeSuccessCount === 0 && roundsSinceWrite >= this.STALE_ROUNDS && round < this.MAX_ROUNDS) {
+        conversation.push({
+          role: 'user',
+          content: I18n.lang === 'es'
+            ? `SYSTEM: Has pasado ${roundsSinceWrite} rondas leyendo datos sin escribir nada. Ya tienes suficiente información. DEJA de leer y EMPIEZA a construir: crea la hoja, escribe los KPIs con fórmulas, formatea, y crea los gráficos. Si necesitas más datos, pídelos al usuario en tu respuesta final.`
+            : `SYSTEM: You have spent ${roundsSinceWrite} rounds reading data without writing anything. You have enough information. STOP reading and START building: create the sheet, write KPIs with formulas, format, and create charts. If you need more data, ask the user in your final answer.`
+        });
+        roundsSinceWrite = 0; // reset to avoid repeated nudges
+      }
 
       // If the model also emitted final text alongside the calls, treat that
       // as a mid-stream narration, not the final answer — keep looping so it

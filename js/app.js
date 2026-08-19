@@ -269,8 +269,15 @@ const App = {
           <span class="run-status-text">${this.escapeHtml(I18n.t('statusThinking'))}</span>
           <span class="run-status-count"></span>
         </div>
+        <div class="thinking-block thinking-live">
+          <div class="thinking-header">
+            <span class="thinking-icon">\u{1F4AD}</span>
+            <span class="thinking-label">${this.escapeHtml(I18n.t('reasoning'))}</span>
+            <span class="thinking-dots"><span></span><span></span><span></span></span>
+          </div>
+          <div class="thinking-text thinking-stream"></div>
+        </div>
         <div class="activity-feed"></div>
-        <div class="activity-summary hidden"></div>
         <div class="live-answer hidden"></div>
       </div>
     `;
@@ -325,10 +332,9 @@ const App = {
       block.classList.remove('thinking-live');
       block.classList.add('thinking-done');
     }
-    // Collapse long thinking by default; user can expand.
+    // Keep thinking visible by default — user can collapse if they want.
     const streamEl = activityEl.querySelector('.thinking-stream');
     if (streamEl && streamEl.textContent.trim().length > 0) {
-      streamEl.classList.add('collapsed');
       header.style.cursor = 'pointer';
       header.onclick = () => streamEl.classList.toggle('collapsed');
     }
@@ -410,19 +416,9 @@ const App = {
       feed.style.display = 'none';
       return;
     }
-    const toolCount = rows.length;
-    const warnCount = feed.querySelectorAll('.tool-row-warn').length;
     feed.classList.add('activity-feed-collapsed');
-    const summary = activityEl.querySelector('.activity-summary');
-    if (summary) {
-      summary.classList.remove('hidden');
-      const stepsLabel = I18n.lang === 'es' ? 'pasos completados' : 'steps completed';
-      const warnLabel = I18n.lang === 'es' ? 'con advertencias' : 'with warnings';
-      let label = `${toolCount} ${stepsLabel}`;
-      if (warnCount) label += ` \u00B7 ${warnCount} ${warnLabel}`;
-      summary.textContent = label;
-      summary.onclick = () => feed.classList.toggle('activity-feed-collapsed');
-    }
+    feed.onclick = () => feed.classList.toggle('activity-feed-collapsed');
+    feed.title = I18n.lang === 'es' ? 'Clic para ver detalles' : 'Click to see details';
   },
 
   toolDetail(name, args) {
