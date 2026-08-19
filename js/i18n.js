@@ -123,6 +123,22 @@ const I18n = {
     invalidKey: {
       es: 'Tu API key es inválida. Verifícala en Configuración.',
       en: 'Your API key is invalid. Check it in Settings.'
+    },
+    quotaExceeded: {
+      es: 'Cuota agotada en OpenRouter. Obtén tu propia key gratuita en openrouter.ai/keys e ingrésala en Configuración.',
+      en: 'OpenRouter quota exhausted. Get your own free key at openrouter.ai/keys and enter it in Settings.'
+    },
+    keyStatusUser: {
+      es: 'Usando tu API key',
+      en: 'Using your API key'
+    },
+    keyStatusPreset: {
+      es: 'Usando key compartida (puede tener límites)',
+      en: 'Using shared key (may have limits)'
+    },
+    keyStatusNone: {
+      es: 'Sin API key',
+      en: 'No API key'
     }
   },
 

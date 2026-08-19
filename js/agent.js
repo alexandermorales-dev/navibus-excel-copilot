@@ -202,9 +202,10 @@ const Agent = {
       // reset the continuation base (any partial text is already in history).
       continuationBase = '';
 
-      // If the model emitted text alongside tool calls, that's reasoning —
+      // If the model emitted reasoning alongside tool calls that wasn't
+      // already streamed (e.g. non-streaming fallback or missed chunks),
       // fire onThinking so the UI can show it in the thinking block.
-      if (result.text && onThinking) onThinking(result.text);
+      if (result.reasoning && onThinking) onThinking(result.reasoning);
 
       // Smart routing: check if we should upgrade to the capable model
       // for the next round based on the tools being called.

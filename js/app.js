@@ -23,6 +23,7 @@ const App = {
       settingsPanel: document.getElementById('settingsPanel'),
       apiKeyInput: document.getElementById('apiKeyInput'),
       apiKeyToggle: document.getElementById('apiKeyToggle'),
+      keyStatus: document.getElementById('keyStatus'),
       modelSelect: document.getElementById('modelSelect'),
       clearChatBtn: document.getElementById('clearChatBtn'),
       statusBar: document.getElementById('statusBar')
@@ -33,6 +34,7 @@ const App = {
     this.el.modelSelect.value = Config.model;
     this.updateSendButton();
     this.updateStopButton();
+    this.updateKeyStatus();
 
     this.el.sendBtn.addEventListener('click', () => this.sendMessage());
     this.el.stopBtn.addEventListener('click', () => this.stopRun());
@@ -52,6 +54,7 @@ const App = {
       Config.apiKey = this.el.apiKeyInput.value.trim();
       Config.save();
       this.updateSendButton();
+      this.updateKeyStatus();
     };
     this.el.apiKeyInput.addEventListener('change', updateApiKey);
     this.el.apiKeyInput.addEventListener('input', updateApiKey);
@@ -118,6 +121,26 @@ const App = {
 
   updateStopButton() {
     this.el.stopBtn.disabled = !this.isRunning;
+  },
+
+  /**
+   * Show a visible indicator of which API key is active so the user can
+   * tell whether their own key or the shared preset key is being used.
+   */
+  updateKeyStatus() {
+    if (!this.el.keyStatus) return;
+    const source = Config.keySource;
+    this.el.keyStatus.classList.remove('key-status-user', 'key-status-preset', 'key-status-none');
+    if (source === 'user') {
+      this.el.keyStatus.textContent = I18n.t('keyStatusUser');
+      this.el.keyStatus.classList.add('key-status-user');
+    } else if (source === 'preset') {
+      this.el.keyStatus.textContent = I18n.t('keyStatusPreset');
+      this.el.keyStatus.classList.add('key-status-preset');
+    } else {
+      this.el.keyStatus.textContent = I18n.t('keyStatusNone');
+      this.el.keyStatus.classList.add('key-status-none');
+    }
   },
 
   async sendMessage() {

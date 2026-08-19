@@ -52,6 +52,17 @@ const Config = {
   },
 
   /**
+   * Returns 'user' if the user's own key is active, 'preset' if falling
+   * back to the shared preset key, or 'none' if no key at all.
+   */
+  get keySource() {
+    if (this._memoryKey && this._memoryKey.length > 0) return 'user';
+    if (this.apiKey && this.apiKey.length > 0) return 'user';
+    if (this.presetKey && this.presetKey.length > 0) return 'preset';
+    return 'none';
+  },
+
+  /**
    * Clear the user's API key from memory, localStorage, and the Settings UI.
    */
   clearUserKey() {

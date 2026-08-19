@@ -16,11 +16,12 @@ const Groq = {
    * @param {Array}  [opts.tools]        — [{type:'function', function:{name,description,parameters}}]
    * @param {string} [opts.model]        — override model (defaults to Config.model or Config.capableModel)
    * @param {number} [opts.maxRetries=4]
-   * @param {function} [opts.onText]     — (chunkText, fullText) live final text
-   * @param {AbortSignal} [opts.signal]  — for user-initiated Stop
+   * @param {function} [opts.onText]      — (chunkText, fullText) live final text
+   * @param {function} [opts.onThinking]  — (fullReasoning) live reasoning/thinking text
+   * @param {AbortSignal} [opts.signal]   — for user-initiated Stop
    *
    * Returns:
-   *   { ok: true, text, functionCalls: [{id, name, args}], message, finishReason }
+   *   { ok: true, text, reasoning, functionCalls: [{id, name, args}], message, finishReason }
    *   { ok: false, error, errorType, retry }
    */
   async generate(opts) {
@@ -31,6 +32,7 @@ const Groq = {
       model,
       maxRetries = 4,
       onText,
+      onThinking,
       signal
     } = opts;
 
@@ -47,7 +49,10 @@ const Groq = {
       ],
       temperature: 0.4,
       max_tokens: maxTokens,
-      stream: true
+      stream: true,
+      // Request reasoning/thinking tokens from models that support them.
+      // Ignored by non-reasoning models, so it's safe to always send.
+      reasoning: { enabled: true, exclude: false }
     };
     if (tools && tools.length > 0) {
       body.tools = tools;
@@ -90,7 +95,7 @@ const Groq = {
         if (signal) signal.removeEventListener('abort', onExternalAbort);
 
         if (resp.ok) {
-          return await this.parseStream(resp, onText, signal);
+          return await this.parseStream(resp, onText, onThinking, signal);
         }
 
         if (resp.status === 429) {
@@ -116,6 +121,18 @@ const Groq = {
             ok: false,
             error: `Authentication failed (${resp.status}). Check your API key in Settings. ${this.truncate(errText, 200)}`,
             errorType: 'client',
+            retry: false
+          };
+        }
+
+        if (resp.status === 402) {
+          // Quota/credits exhausted — don't retry, tell the user clearly.
+          const errText = await resp.text();
+          console.log(`402 quota exceeded: ${this.truncate(errText, 300)}`);
+          return {
+            ok: false,
+            error: I18n.t('quotaExceeded'),
+            errorType: 'quota',
             retry: false
           };
         }
@@ -172,17 +189,18 @@ const Groq = {
 
   /**
    * Parse SSE stream from chat/completions.
-   * Accumulates text content and tool_calls across chunks.
+   * Accumulates text content, reasoning/thinking, and tool_calls across chunks.
    *
-   * Returns: { ok: true, text, functionCalls, message, finishReason }
+   * Returns: { ok: true, text, reasoning, functionCalls, message, finishReason }
    *   message = the full assistant message object for conversation history
    *   finishReason = 'STOP' or 'MAX_TOKENS' (mapped from OpenAI format)
    */
-  async parseStream(resp, onText, signal) {
+  async parseStream(resp, onText, onThinking, signal) {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
     let fullText = '';
+    let fullReasoning = '';
     let finishReason = null;
 
     // Tool calls are accumulated by index across chunks
@@ -222,6 +240,15 @@ const Groq = {
           if (delta.content) {
             fullText += delta.content;
             if (onText) onText(delta.content, fullText);
+          }
+
+          // Accumulate reasoning/thinking tokens. OpenRouter emits these
+          // under `delta.reasoning`; some upstreams use `reasoning_content`
+          // as an alias, so we check both for robustness.
+          const reasoningChunk = delta.reasoning || delta.reasoning_content;
+          if (reasoningChunk) {
+            fullReasoning += reasoningChunk;
+            if (onThinking) onThinking(fullReasoning);
           }
 
           // Accumulate tool calls by index
@@ -270,6 +297,8 @@ const Groq = {
     const message = {
       role: 'assistant',
       content: fullText || null,
+      // Preserve reasoning so it can be replayed on follow-up turns.
+      reasoning: fullReasoning || undefined,
       tool_calls: toolCallsArr.length > 0 ? toolCallsArr : undefined
     };
 
@@ -281,6 +310,7 @@ const Groq = {
     return {
       ok: true,
       text: fullText,
+      reasoning: fullReasoning,
       functionCalls,
       message,
       finishReason: mappedFinishReason
