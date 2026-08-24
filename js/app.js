@@ -266,66 +266,78 @@ const App = {
       return;
     }
 
-    this.isRunning = true;
-    this.updateSendButton();
-    this.updateStopButton();
     this.el.messageInput.value = '';
     this.lastUserText = text;
-    this._hasWrittenThisRun = false;
-
     this.addMessage('user', text);
     this.conversation.push({ role: 'user', content: text });
 
+    await this._runAgent(text);
+  },
+
+  async retryLastMessage() {
+    if (this.isRunning || !this.lastUserText) return;
+    await this._runAgent(this.lastUserText, { retry: true });
+  },
+
+  /**
+   * Drive one agent run and reflect its progress in the UI.
+   *
+   * The agent now reports phases and ops rather than tool rounds, so the
+   * feed shows the plan as a checklist that ticks off while ops execute
+   * locally — there is no longer a model round-trip between each step.
+   */
+  async _runAgent(text, { retry = false } = {}) {
+    this.isRunning = true;
+    this.updateSendButton();
+    this.updateStopButton();
     this.abortController = new AbortController();
 
-    // Create the live activity container for this run.
     const activityEl = this.addActivityContainer();
+    if (retry) this.updateLiveThinking(activityEl, I18n.t('retryingMessage'));
 
     try {
       const result = await Agent.run({
         userText: text,
         conversation: this.conversation,
         signal: this.abortController.signal,
-        onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
-        onThinking: (text) => this.updateLiveThinking(activityEl, text),
-        onToolStart: (callId, name, args) => {
-          this.addToolRow(activityEl, callId, name, args);
-          if (this.isWriteTool(name)) this._hasWrittenThisRun = true;
-          this.updateRunStatus(activityEl, this.toolPhase(name), this.toolPhaseDetail(name, args));
+        onPhase: (phase, detail) => this.updateRunStatus(activityEl, phase, detail),
+        onThinking: (t) => this.updateLiveThinking(activityEl, t),
+        onProvider: (label, model, isFailover) => {
+          this.setProviderBadge(activityEl, label, model, isFailover);
+          if (isFailover) this.showStatus(I18n.tf('switchedProvider', label));
         },
-        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult),
-        onToolError: (name, error) => this.showToolError(activityEl, name, error),
-        onRound: (round, maxRounds) => {
-          if (round > 1) this.updateRunStatus(activityEl, 'thinking');
-        }
+        onPlan: (ops) => this.renderPlanChecklist(activityEl, ops),
+        onOpStart: (id, name, args) => this.startOpRow(activityEl, id, name, args),
+        onOpEnd: (id, name, res) => this.finalizeToolRow(activityEl, id, res)
       });
 
       this.finalizeLiveThinking(activityEl);
+      this.hideStatus();
+      this.renderQuotaBar();
 
       if (!result.ok) {
         this.updateRunStatus(activityEl, 'error');
-        this.finalizeLiveAnswer(activityEl);
         this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
       } else {
-        this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
+        this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done',
+                             I18n.tf('callsUsed', result.calls));
         this.collapseActivityFeed(activityEl);
-        this.finalizeLiveAnswer(activityEl, result.sealed && !result.aborted);
-        const ansEl = activityEl.querySelector('.live-answer');
-        if ((!ansEl || ansEl.classList.contains('hidden')) && result.finalText) {
+        if (result.finalText) {
           this.addFinalMessage(result.finalText, result.sealed, result.aborted);
+          this.conversation.push({ role: 'assistant', content: result.finalText });
         }
       }
+      console.log(`Agent run: ${result.calls} API call(s), ~${result.tokens || 0} tokens`);
     } catch (e) {
       this.finalizeLiveThinking(activityEl);
+      this.hideStatus();
       this.updateRunStatus(activityEl, 'error');
       this.collapseActivityFeed(activityEl);
-      this.finalizeLiveAnswer(activityEl);
       this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
     }
 
     this.abortController = null;
     this.isRunning = false;
-    this._hasWrittenThisRun = false;
     this.updateSendButton();
     this.updateStopButton();
   },
@@ -334,62 +346,6 @@ const App = {
     if (this.abortController) this.abortController.abort();
   },
 
-  async retryLastMessage() {
-    if (this.isRunning || !this.lastUserText) return;
-    this.isRunning = true;
-    this._hasWrittenThisRun = false;
-    this.updateSendButton();
-    this.updateStopButton();
-    this.abortController = new AbortController();
-
-    const activityEl = this.addActivityContainer();
-    this.updateLiveThinking(activityEl, I18n.t('retryingMessage'));
-
-    try {
-      const result = await Agent.run({
-        userText: this.lastUserText,
-        conversation: this.conversation,
-        signal: this.abortController.signal,
-        onText: (chunk, full) => this.updateLiveAnswer(activityEl, full),
-        onThinking: (text) => this.updateLiveThinking(activityEl, text),
-        onToolStart: (callId, name, args) => {
-          this.addToolRow(activityEl, callId, name, args);
-          if (this.isWriteTool(name)) this._hasWrittenThisRun = true;
-          this.updateRunStatus(activityEl, this.toolPhase(name), this.toolPhaseDetail(name, args));
-        },
-        onToolEnd: (callId, name, toolResult) => this.finalizeToolRow(activityEl, callId, toolResult),
-        onToolError: (name, error) => this.showToolError(activityEl, name, error),
-        onRound: (round, maxRounds) => {
-          if (round > 1) this.updateRunStatus(activityEl, 'thinking');
-        }
-      });
-      this.finalizeLiveThinking(activityEl);
-      if (!result.ok) {
-        this.updateRunStatus(activityEl, 'error');
-        this.finalizeLiveAnswer(activityEl);
-        this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
-      } else {
-        this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done');
-        this.collapseActivityFeed(activityEl);
-        this.finalizeLiveAnswer(activityEl, result.sealed && !result.aborted);
-        const ansEl = activityEl.querySelector('.live-answer');
-        if ((!ansEl || ansEl.classList.contains('hidden')) && result.finalText) {
-          this.addFinalMessage(result.finalText, result.sealed, result.aborted);
-        }
-      }
-    } catch (e) {
-      this.finalizeLiveThinking(activityEl);
-      this.updateRunStatus(activityEl, 'error');
-      this.collapseActivityFeed(activityEl);
-      this.finalizeLiveAnswer(activityEl);
-      this.addErrorMessageWithRetry(`${I18n.t('genericError')}: ${e.message || String(e)}`);
-    }
-
-    this.abortController = null;
-    this.isRunning = false;
-    this.updateSendButton();
-    this.updateStopButton();
-  },
 
   /* ----------------------------------------------------------
      ACTIVITY FEED UI
@@ -414,7 +370,6 @@ const App = {
           <div class="thinking-text thinking-stream"></div>
         </div>
         <div class="activity-feed"></div>
-        <div class="live-answer hidden"></div>
       </div>
     `;
     this.el.messageList.appendChild(msg);
@@ -435,19 +390,61 @@ const App = {
 
     statusEl.classList.remove('run-status-active', 'run-status-done', 'run-status-error', 'run-status-stopped');
 
-    let label = '';
-    switch (phase) {
-      case 'thinking':  label = I18n.t('statusThinking');  statusEl.classList.add('run-status-active'); break;
-      case 'reading':   label = I18n.t('statusReading');   statusEl.classList.add('run-status-active'); break;
-      case 'writing':   label = I18n.t('statusWriting');   statusEl.classList.add('run-status-active'); break;
-      case 'verifying': label = I18n.t('statusVerifying'); statusEl.classList.add('run-status-active'); break;
-      case 'done':      label = I18n.t('statusDone');      statusEl.classList.add('run-status-done'); break;
-      case 'error':     label = I18n.t('statusError');     statusEl.classList.add('run-status-error'); break;
-      case 'stopped':   label = I18n.t('statusStopped');   statusEl.classList.add('run-status-stopped'); break;
-      default: label = phase;
-    }
-    textEl.textContent = label;
+    const LABELS = {
+      thinking:  ['statusThinking',  'active'],
+      reading:   ['statusReading',   'active'],
+      planning:  ['statusPlanning',  'active'],
+      writing:   ['statusWriting',   'active'],
+      verifying: ['statusVerifying', 'active'],
+      repairing: ['statusRepairing', 'active'],
+      done:      ['statusDone',      'done'],
+      error:     ['statusError',     'error'],
+      stopped:   ['statusStopped',   'stopped']
+    };
+    const entry = LABELS[phase];
+    textEl.textContent = entry ? I18n.t(entry[0]) : phase;
+    statusEl.classList.add(`run-status-${entry ? entry[1] : 'active'}`);
     if (countEl) countEl.textContent = detail || '';
+  },
+
+  /**
+   * Render the plan as a checklist up front, so the user can see the whole
+   * intended sequence before it runs instead of watching rows appear one
+   * model round at a time.
+   */
+  renderPlanChecklist(activityEl, ops) {
+    const feed = activityEl.querySelector('.activity-feed');
+    if (!feed) return;
+    feed.innerHTML = '';
+    const header = document.createElement('div');
+    header.className = 'plan-header';
+    header.textContent = `${I18n.t('planLabel')} — ${I18n.tf('planSteps', ops.length)}`;
+    feed.appendChild(header);
+    this.scrollToBottom();
+  },
+
+  setProviderBadge(activityEl, label, model, isFailover) {
+    const statusEl = activityEl.querySelector('.run-status');
+    if (!statusEl) return;
+    let badge = statusEl.querySelector('.provider-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'provider-badge';
+      statusEl.appendChild(badge);
+    }
+    badge.textContent = I18n.tf('usingProvider', label, model);
+    badge.classList.toggle('provider-badge-failover', !!isFailover);
+  },
+
+  /**
+   * An op is starting. Ops execute locally and fast, so rows are added as
+   * they run rather than being pre-rendered.
+   */
+  startOpRow(activityEl, id, name, args) {
+    this.addToolRow(activityEl, id, name, args);
+    this.updateRunStatus(activityEl,
+      name === 'read_range' ? 'verifying' : 'writing',
+      this.toolDetail(name, args));
   },
 
   updateLiveThinking(activityEl, fullText) {
@@ -473,37 +470,6 @@ const App = {
     if (streamEl && streamEl.textContent.trim().length > 0) {
       header.style.cursor = 'pointer';
       header.onclick = () => streamEl.classList.toggle('collapsed');
-    }
-  },
-
-  updateLiveAnswer(activityEl, fullText) {
-    if (!activityEl || !fullText) return;
-    const ansEl = activityEl.querySelector('.live-answer');
-    if (ansEl) {
-      ansEl.classList.remove('hidden');
-      ansEl._rawText = fullText;
-      ansEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
-    }
-    this.scrollToBottom();
-  },
-
-  finalizeLiveAnswer(activityEl, addUndo = false) {
-    if (!activityEl) return;
-    const ansEl = activityEl.querySelector('.live-answer');
-    if (ansEl && ansEl.classList.contains('hidden')) {
-      ansEl.remove();
-    } else if (ansEl) {
-      ansEl.classList.add('live-answer-done', 'final-answer');
-      const rawText = ansEl._rawText || ansEl.textContent || '';
-      ansEl.innerHTML = this.formatMarkdown(rawText);
-      if (addUndo) {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn-undo';
-        btn.textContent = I18n.t('undo');
-        btn.addEventListener('click', () => this.undoLastRequest(btn));
-        ansEl.appendChild(btn);
-      }
     }
   },
 
@@ -540,10 +506,6 @@ const App = {
     this.scrollToBottom();
   },
 
-  showToolError(activityEl, toolName, error) {
-    // Silently handled — the agent receives tool errors and can self-correct.
-  },
-
   collapseActivityFeed(activityEl) {
     const feed = activityEl.querySelector('.activity-feed');
     if (!feed) return;
@@ -558,66 +520,21 @@ const App = {
   },
 
   toolDetail(name, args) {
-    // Short human-readable summary of a tool call's arguments.
+    // Short human-readable summary of an op's arguments.
     const a = args || {};
+    const at = (a.sheet && a.range) ? `${a.sheet}!${a.range}` : (a.sheet || '');
     switch (name) {
-      case 'get_workbook_overview': return '';
-      case 'read_range': return `${a.sheet || ''}!${a.range || ''}${a.what && a.what !== 'values' ? ' (' + a.what + ')' : ''}`;
-      case 'find_in_workbook': return `"${a.query || ''}"${a.sheet ? ' en ' + a.sheet : ''}`;
-      case 'get_objects': return a.sheet ? a.sheet : '';
-      case 'write_range': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'format_range': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'clear_range': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'add_sheet': return a.name || '';
-      case 'delete_sheet': return a.name || '';
-      case 'create_table': return a.name || '';
-      case 'create_pivot': return a.name || '';
-      case 'create_chart': return a.title || a.type || '';
-      case 'add_slicer': return a.field || '';
-      case 'conditional_format': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'autofit': return a.sheet || '';
-      case 'insert_rows_cols': return `${a.sheet || ''} ${a.kind || ''} @${a.at || ''}`;
-      case 'delete_rows_cols': return `${a.sheet || ''} ${a.kind || ''} @${a.at || ''}`;
-      case 'sort_range': return `${a.sheet || ''}!${a.range || ''}`;
-      default: return '';
-    }
-  },
-
-  /**
-   * Map a tool name to a high-level phase for the status indicator.
-   * Reading tools → 'reading', writing/creating tools → 'writing',
-   * read_range after writes → 'verifying' (heuristic: any read_range
-   * that follows a write in the same run is treated as verification).
-   */
-  toolPhase(name) {
-    const READ_TOOLS = ['get_workbook_overview', 'read_range', 'find_in_workbook', 'get_objects'];
-    const WRITE_TOOLS = ['write_range', 'format_range', 'clear_range', 'add_sheet', 'delete_sheet',
-                         'create_table', 'create_pivot', 'create_chart', 'add_slicer',
-                         'conditional_format', 'autofit', 'insert_rows_cols', 'delete_rows_cols', 'sort_range'];
-    if (WRITE_TOOLS.includes(name)) return 'writing';
-    if (READ_TOOLS.includes(name)) return this._hasWrittenThisRun ? 'verifying' : 'reading';
-    return 'thinking';
-  },
-
-  isWriteTool(name) {
-    const WRITE_TOOLS = ['write_range', 'format_range', 'clear_range', 'add_sheet', 'delete_sheet',
-                         'create_table', 'create_pivot', 'create_chart', 'add_slicer',
-                         'conditional_format', 'autofit', 'insert_rows_cols', 'delete_rows_cols', 'sort_range'];
-    return WRITE_TOOLS.includes(name);
-  },
-
-  toolPhaseDetail(name, args) {
-    const a = args || {};
-    switch (name) {
-      case 'get_workbook_overview': return '';
-      case 'read_range': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'write_range': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'format_range': return `${a.sheet || ''}!${a.range || ''}`;
-      case 'add_sheet': return a.name || '';
-      case 'create_chart': return a.title || a.type || '';
-      case 'create_pivot': return a.name || '';
-      case 'create_table': return a.name || '';
-      default: return this.toolDetail(name, args);
+      case 'add_sheet':
+      case 'delete_sheet':
+      case 'create_table':
+      case 'create_pivot':      return a.name || '';
+      case 'create_chart':      return a.title || a.type || '';
+      case 'add_slicer':        return a.field || '';
+      case 'autofit':           return a.sheet || '';
+      case 'insert_rows_cols':
+      case 'delete_rows_cols':  return `${a.sheet || ''} ${a.kind || ''} @${a.at || ''}`;
+      case 'read_range':        return at + (a.what && a.what !== 'values' ? ` (${a.what})` : '');
+      default:                  return at;
     }
   },
 
@@ -707,7 +624,8 @@ const App = {
   clearChat() {
     this.conversation = [];
     Journal.clear();
-    Tools.invalidateOverviewCache(); // fresh session — force re-read on next request
+    Tools.invalidateOverviewCache();
+    Context.reset();  // forget which sheets this session created
     this.el.messageList.innerHTML = '';
     this.addMessage('assistant', I18n.t('clearChatDone'));
   },
