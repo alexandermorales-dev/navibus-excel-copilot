@@ -308,62 +308,85 @@ const Schema = {
   },
 
   /**
-   * Format the snapshot as a compact text description for the LLM prompt.
+   * Detail levels for snapshot rendering. The snapshot is injected into
+   * every planning prompt, so its size directly drives token cost — and on
+   * providers whose free tier binds on tokens-per-minute, size decides
+   * whether a call fits at all. Callers pick a level to fit their budget.
+   *
+   *   compact — names, dimensions, headers. Enough to pick a sheet.
+   *   normal  — + column types, exact column stats, a few sample rows.
+   *   full    — + more sample rows and column letters.
    */
-  toText(snap) {
-    if (snap.sheetCount === 0) return 'The workbook is empty (no sheets).';
-    let lines = [`Workbook has ${snap.sheetCount} sheet(s):\n`];
+  DETAIL: {
+    compact: { stats: false, types: false, sampleRows: 0 },
+    normal:  { stats: true,  types: true,  sampleRows: 3 },
+    full:    { stats: true,  types: true,  sampleRows: 10 }
+  },
+
+  /**
+   * Format the snapshot as a compact text description for the LLM prompt.
+   * @param {object} snap
+   * @param {string} [level] — 'compact' | 'normal' | 'full'
+   */
+  toText(snap, level = 'normal') {
+    const cfg = this.DETAIL[level] || this.DETAIL.normal;
+    if (!snap || snap.sheetCount === 0) return 'The workbook is empty (no sheets).';
+
+    const lines = [`Workbook has ${snap.sheetCount} sheet(s):`, ''];
     for (const s of snap.sheets) {
       if (s.error) {
-        lines.push(`  - "${s.name}": ⚠ COULD NOT READ THIS SHEET (error: ${s.errorMessage}). Do NOT assume it is empty — tell the user you were unable to read it.`);
-        lines.push('');
+        lines.push(`  - "${s.name}": COULD NOT READ THIS SHEET (${s.errorMessage}). Do not assume it is empty.`);
         continue;
       }
       if (s.empty) {
         lines.push(`  - "${s.name}": empty sheet`);
-        lines.push('');
         continue;
       }
-      const copilotTag = s.isCopilotSheet ? ' [copilot output sheet — not source data]' : '';
-      lines.push(`  - "${s.name}": ${s.rows} rows × ${s.cols} cols (used range: ${s.address})${copilotTag}`);
-      if (s.hasHeaders) {
-        lines.push(`    Headers: [${s.headers.map(h => `"${h}"`).join(', ')}]`);
-        if (s.columnTypes.length > 0) {
-          lines.push(`    Types: [${s.columnTypes.join(', ')}]`);
-        }
-        if (Array.isArray(s.columnStats) && s.columnStats.some(st => st)) {
-          if (s.statsPartial) {
-            lines.push(`    Column stats (computed over first ${s.statsRowCount} of ${s.rows - 1} data rows — PARTIAL, may not reflect all data):`);
-          } else {
-            lines.push(`    Column stats (computed over ALL ${s.rows - 1} data rows, exact — safe to quote directly):`);
-          }
-          for (let c = 0; c < s.headers.length; c++) {
-            const st = s.columnStats[c];
-            if (!st) continue;
-            let statLine = `      "${s.headers[c]}": sum=${st.sum}, avg=${st.avg}, min=${st.min}, max=${st.max}, count=${st.count}`;
-            if (st.nonNumericCells > 0) {
-              statLine += ` (${st.nonNumericCells} non-numeric cells excluded)`;
-            }
-            lines.push(statLine);
-          }
-        }
-        if (s.sampleRows.length > 0) {
-          lines.push(`    Sample rows${s.truncated ? ` (showing ${s.sampleRows.length} of ${s.rows - 1} data rows — truncated)` : ''}:`);
-          for (const row of s.sampleRows) {
-            lines.push(`      [${row.join(' | ')}]`);
-          }
-        }
-      } else {
-        lines.push(`    (no clear header row)`);
-        if (s.sampleRows.length > 0) {
-          lines.push(`    First rows${s.truncated ? ` (showing ${s.sampleRows.length} of ${s.rows} rows — truncated)` : ''}:`);
-          for (const row of s.sampleRows) {
-            lines.push(`      [${row.join(' | ')}]`);
-          }
+
+      const copilotTag = s.isCopilotSheet ? ' [previous copilot output — not source data]' : '';
+      lines.push(`  - "${s.name}": ${s.rows} rows x ${s.cols} cols, used range ${s.address}${copilotTag}`);
+
+      if (!s.hasHeaders) {
+        lines.push('    (no clear header row)');
+        this._pushSamples(lines, s, cfg.sampleRows, false);
+        continue;
+      }
+
+      // Pair each header with its column letter so the model can build
+      // ranges without guessing which letter a column lives in.
+      const cols = s.headers.map((h, i) => `${this.colToLetter(i + 1)}="${h}"`);
+      lines.push(`    Columns: ${cols.join(', ')}`);
+
+      if (cfg.types && s.columnTypes.length > 0) {
+        lines.push(`    Types: ${s.columnTypes.join(', ')}`);
+      }
+
+      if (cfg.stats && Array.isArray(s.columnStats) && s.columnStats.some(st => st)) {
+        const scope = s.statsPartial
+          ? `first ${s.statsRowCount} of ${s.rows - 1} data rows, PARTIAL`
+          : `all ${s.rows - 1} data rows, exact`;
+        lines.push(`    Numeric stats (${scope}):`);
+        for (let c = 0; c < s.headers.length; c++) {
+          const st = s.columnStats[c];
+          if (!st) continue;
+          let line = `      "${s.headers[c]}": sum=${st.sum} avg=${st.avg} min=${st.min} max=${st.max} n=${st.count}`;
+          if (st.nonNumericCells > 0) line += ` (${st.nonNumericCells} non-numeric skipped)`;
+          lines.push(line);
         }
       }
-      lines.push('');
+
+      this._pushSamples(lines, s, cfg.sampleRows, true);
     }
+
     return lines.join('\n');
+  },
+
+  _pushSamples(lines, s, maxRows, hasHeaders) {
+    if (!maxRows || !s.sampleRows || s.sampleRows.length === 0) return;
+    const rows = s.sampleRows.slice(0, maxRows);
+    const total = hasHeaders ? s.rows - 1 : s.rows;
+    const note = total > rows.length ? ` (${rows.length} of ${total})` : '';
+    lines.push(`    Sample rows${note}:`);
+    for (const row of rows) lines.push(`      [${row.join(' | ')}]`);
   }
 };

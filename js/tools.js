@@ -716,6 +716,22 @@ const Tools = {
         if (action.dest) chart.setPosition(action.dest);
         chart.width = action.width || 380;
         chart.height = action.height || 240;
+        // Axis titles are best-effort: not every chart type exposes both
+        // axes, and pie/doughnut expose neither.
+        const safeSet = (setter) => { try { setter(); } catch (e) { /* axis unavailable */ } };
+        if (action.xAxisTitle) {
+          safeSet(() => {
+            chart.axes.categoryAxis.title.text = action.xAxisTitle;
+            chart.axes.categoryAxis.title.visible = true;
+          });
+        }
+        if (action.yAxisTitle) {
+          safeSet(() => {
+            chart.axes.valueAxis.title.text = action.yAxisTitle;
+            chart.axes.valueAxis.title.visible = true;
+          });
+        }
+        if (action.showLegend === false) safeSet(() => chart.legend.visible = false);
         chart.load('name');
         await ctx.sync();
         return { name: chart.name || 'chart' };
