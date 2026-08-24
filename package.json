@@ -1,0 +1,12 @@
+{
+  "name": "excel-ai-copilot",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Excel task-pane add-in: AI copilot for building reports, dashboards and answering questions about a workbook.",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "comments": {
+    "no-build-step": "The add-in itself has no build step and no runtime dependencies. It is plain <script> tags over static files, served as-is. This manifest exists only so `npm test` can run the Node built-in test runner against the pure-JS modules."
+  }
+}

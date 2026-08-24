@@ -21,22 +21,16 @@ const App = {
       stopBtn: document.getElementById('stopBtn'),
       settingsBtn: document.getElementById('settingsBtn'),
       settingsPanel: document.getElementById('settingsPanel'),
-      apiKeyInput: document.getElementById('apiKeyInput'),
-      apiKeyToggle: document.getElementById('apiKeyToggle'),
-      geminiKeyInput: document.getElementById('geminiKeyInput'),
-      keyStatus: document.getElementById('keyStatus'),
-      modelSelect: document.getElementById('modelSelect'),
+      providerList: document.getElementById('providerList'),
+      advancedList: document.getElementById('advancedList'),
+      resetQuotaBtn: document.getElementById('resetQuotaBtn'),
+      quotaBar: document.getElementById('quotaBar'),
       clearChatBtn: document.getElementById('clearChatBtn'),
       statusBar: document.getElementById('statusBar')
     };
 
     Config.load();
-    this.el.apiKeyInput.value = Config.apiKey;
-    this.el.geminiKeyInput.value = Config.geminiApiKey;
-    this.el.modelSelect.value = Config.model;
-    this.updateSendButton();
-    this.updateStopButton();
-    this.updateKeyStatus();
+    Quota.load();
 
     this.el.sendBtn.addEventListener('click', () => this.sendMessage());
     this.el.stopBtn.addEventListener('click', () => this.stopRun());
@@ -52,45 +46,24 @@ const App = {
       this.el.settingsPanel.classList.toggle('hidden');
     });
 
-    const updateApiKey = () => {
-      Config.apiKey = this.el.apiKeyInput.value.trim();
-      Config.save();
-      this.updateSendButton();
-      this.updateKeyStatus();
-    };
-    this.el.apiKeyInput.addEventListener('change', updateApiKey);
-    this.el.apiKeyInput.addEventListener('input', updateApiKey);
-    this.el.apiKeyInput.addEventListener('blur', updateApiKey);
-
-    const updateGeminiKey = () => {
-      Config.geminiApiKey = this.el.geminiKeyInput.value.trim();
-      Config.save();
-    };
-    this.el.geminiKeyInput.addEventListener('change', updateGeminiKey);
-    this.el.geminiKeyInput.addEventListener('input', updateGeminiKey);
-    this.el.geminiKeyInput.addEventListener('blur', updateGeminiKey);
-
-    this.el.apiKeyToggle.addEventListener('click', () => {
-      const input = this.el.apiKeyInput;
-      const eyeIcon = this.el.apiKeyToggle.querySelector('.icon-eye');
-      const eyeOffIcon = this.el.apiKeyToggle.querySelector('.icon-eye-off');
-      if (input.type === 'password') {
-        input.type = 'text';
-        eyeIcon.classList.add('hidden');
-        eyeOffIcon.classList.remove('hidden');
-      } else {
-        input.type = 'password';
-        eyeIcon.classList.remove('hidden');
-        eyeOffIcon.classList.add('hidden');
-      }
-    });
-
-    this.el.modelSelect.addEventListener('change', () => {
-      Config.model = this.el.modelSelect.value;
-      Config.save();
+    this.el.resetQuotaBtn.addEventListener('click', () => {
+      Quota.reset();
+      this.renderQuotaBar();
+      this.addMessage('system', I18n.t('quotaReset'));
     });
 
     this.el.clearChatBtn.addEventListener('click', () => this.clearChat());
+
+    const boot = () => {
+      I18n.init();
+      this.renderProviderSettings();
+      this.localizeUI();
+      this.renderQuotaBar();
+      this.updateSendButton();
+      this.updateStopButton();
+      // No key yet → open Settings so onboarding is the first thing seen.
+      if (!Config.hasApiKey()) this.el.settingsPanel.classList.remove('hidden');
+    };
 
     if (typeof Office !== 'undefined' && Office.onReady) {
       Office.onReady((info) => {
@@ -99,19 +72,169 @@ const App = {
             console.log('Excel AI Copilot ready');
           }
         } catch (e) { /* info or HostType may be undefined outside Excel */ }
-        I18n.init();
-        this.localizeUI();
+        boot();
       });
       // Fallback: if Office.onReady doesn't fire within 3s (e.g. outside
-      // Excel), initialize i18n anyway so the UI isn't stuck in default lang.
-      setTimeout(() => {
-        if (!I18n.initialized) { I18n.init(); this.localizeUI(); }
-      }, 3000);
+      // Excel), initialize anyway so the UI isn't stuck in the default lang.
+      setTimeout(() => { if (!I18n.initialized) boot(); }, 3000);
     } else {
       console.warn('Office.js not loaded — running in browser dev mode');
-      I18n.init();
-      this.localizeUI();
+      boot();
     }
+  },
+
+  /* ----------------------------------------------------------
+     PROVIDER SETTINGS / ONBOARDING
+     Rows are generated from the Providers registry so adding a
+     provider there needs no HTML changes.
+     ---------------------------------------------------------- */
+  renderProviderSettings() {
+    const list = this.el.providerList;
+    const advanced = this.el.advancedList;
+    if (!list) return;
+    list.innerHTML = '';
+    if (advanced) advanced.innerHTML = '';
+
+    for (const id of Providers.ids()) {
+      const p = Providers.get(id);
+      const row = document.createElement('div');
+      row.className = 'provider-row';
+      row.innerHTML = `
+        <div class="provider-head">
+          <label for="key_${id}">${this.escapeHtml(p.label)}</label>
+          <a href="${p.keyUrl}" target="_blank" class="provider-link">${this.escapeHtml(I18n.t('getKey'))}</a>
+        </div>
+        <div class="api-key-wrapper">
+          <input type="password" id="key_${id}" placeholder="${this.escapeHtml(p.keyPlaceholder)}" autocomplete="off" spellcheck="false" />
+          <button type="button" class="api-key-toggle" data-toggle="${id}" title="Show/Hide" aria-label="Toggle visibility">
+            <svg class="icon-eye" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+            <svg class="icon-eye-off hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          </button>
+          <button type="button" class="btn-test" data-test="${id}">${this.escapeHtml(I18n.t('testKey'))}</button>
+        </div>
+        <p class="provider-status" data-status="${id}"></p>
+      `;
+      list.appendChild(row);
+
+      const input = row.querySelector(`#key_${id}`);
+      input.value = Config.keyFor(id);
+
+      const commit = () => {
+        Config.setKey(id, input.value);
+        this.updateSendButton();
+        this.renderQuotaBar();
+      };
+      input.addEventListener('change', commit);
+      input.addEventListener('blur', commit);
+      // Commit on input too: some Excel WebViews don't fire change reliably.
+      input.addEventListener('input', commit);
+
+      row.querySelector(`[data-toggle="${id}"]`).addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        const eye = btn.querySelector('.icon-eye');
+        const eyeOff = btn.querySelector('.icon-eye-off');
+        const show = input.type === 'password';
+        input.type = show ? 'text' : 'password';
+        eye.classList.toggle('hidden', show);
+        eyeOff.classList.toggle('hidden', !show);
+      });
+
+      row.querySelector(`[data-test="${id}"]`).addEventListener('click', (e) => {
+        this.testProvider(id, e.currentTarget);
+      });
+
+      this.showProviderStatus(id, Config.keyFor(id) ? '' : I18n.t('noKeySet'), 'muted');
+
+      // Advanced: pin a specific model instead of automatic resolution.
+      if (advanced) {
+        const adv = document.createElement('div');
+        adv.className = 'settings-row';
+        adv.innerHTML = `
+          <label for="model_${id}">${this.escapeHtml(p.label)} — ${this.escapeHtml(I18n.t('modelOverride'))}</label>
+          <select id="model_${id}"></select>
+        `;
+        advanced.appendChild(adv);
+        this._fillModelSelect(id, adv.querySelector(`#model_${id}`));
+      }
+    }
+  },
+
+  _fillModelSelect(id, select) {
+    if (!select) return;
+    const current = Config.modelOverride(id);
+    const models = Providers.discovered[id] || Config.loadDiscovered(id) || [];
+    select.innerHTML = `<option value="">${this.escapeHtml(I18n.t('modelAuto'))}</option>` +
+      models.map(m => `<option value="${this.escapeHtml(m)}">${this.escapeHtml(m)}</option>`).join('');
+    select.value = current;
+    select.onchange = () => Config.setModelOverride(id, select.value);
+  },
+
+  /**
+   * Probe a provider's /models endpoint. A 200 proves the key works and
+   * gives us the real model list, so resolution never relies on a
+   * hardcoded slug that may have been deprecated.
+   */
+  async testProvider(id, btn) {
+    if (!Config.keyFor(id)) {
+      this.showProviderStatus(id, I18n.t('noKeySet'), 'muted');
+      return;
+    }
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = I18n.t('testing');
+    this.showProviderStatus(id, I18n.t('testing'), 'muted');
+
+    const res = await Providers.discover(id);
+
+    btn.disabled = false;
+    btn.textContent = original;
+
+    if (res.ok) {
+      const model = Providers.resolveModel(id, 'plan');
+      this.showProviderStatus(id, I18n.tf('testOk', model), 'ok');
+      const select = document.getElementById(`model_${id}`);
+      if (select) this._fillModelSelect(id, select);
+      this.renderQuotaBar();
+    } else {
+      this.showProviderStatus(id, I18n.tf('testFailed', res.error), 'error');
+    }
+  },
+
+  showProviderStatus(id, text, kind) {
+    const el = document.querySelector(`[data-status="${id}"]`);
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = `provider-status provider-status-${kind || 'muted'}`;
+  },
+
+  /* ----------------------------------------------------------
+     QUOTA BAR
+     ---------------------------------------------------------- */
+  renderQuotaBar() {
+    const bar = this.el.quotaBar;
+    if (!bar) return;
+    const rows = Quota.summary();
+    if (rows.length === 0) {
+      bar.classList.add('hidden');
+      bar.innerHTML = '';
+      return;
+    }
+    bar.classList.remove('hidden');
+    const chips = rows.map(r => {
+      let detail;
+      if (r.state === 'invalid') detail = I18n.t('quotaInvalid');
+      else if (r.state === 'exhausted') detail = I18n.t('quotaExhausted');
+      else if (r.state === 'cooldown') detail = I18n.t('quotaCooldown');
+      else detail = `${r.remaining}/${r.limit}`;
+      return `<span class="quota-chip quota-${r.state}">${this.escapeHtml(r.label)} <b>${this.escapeHtml(detail)}</b></span>`;
+    }).join('');
+    bar.innerHTML = `<span class="quota-label">${this.escapeHtml(I18n.t('quotaTitle'))}</span>${chips}`;
+    bar.title = I18n.t('quotaTitle');
   },
 
   localizeUI() {
@@ -131,26 +254,6 @@ const App = {
 
   updateStopButton() {
     this.el.stopBtn.disabled = !this.isRunning;
-  },
-
-  /**
-   * Show a visible indicator of which API key is active so the user can
-   * tell whether their own key or the shared preset key is being used.
-   */
-  updateKeyStatus() {
-    if (!this.el.keyStatus) return;
-    const source = Config.keySource;
-    this.el.keyStatus.classList.remove('key-status-user', 'key-status-preset', 'key-status-none');
-    if (source === 'user') {
-      this.el.keyStatus.textContent = I18n.t('keyStatusUser');
-      this.el.keyStatus.classList.add('key-status-user');
-    } else if (source === 'preset') {
-      this.el.keyStatus.textContent = I18n.t('keyStatusPreset');
-      this.el.keyStatus.classList.add('key-status-preset');
-    } else {
-      this.el.keyStatus.textContent = I18n.t('keyStatusNone');
-      this.el.keyStatus.classList.add('key-status-none');
-    }
   },
 
   async sendMessage() {

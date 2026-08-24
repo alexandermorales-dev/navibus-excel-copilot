@@ -32,8 +32,8 @@ const I18n = {
       en: "Hi! I'm your Excel AI Copilot. I can build reports, dashboards, tables, charts and more — and answer questions about your data."
     },
     welcomeHint: {
-      es: 'Listo para usar. Para mejor rendimiento, ingresa tu propia API key en Configuración.',
-      en: 'Ready to use. For better performance, enter your own API key in Settings.'
+      es: 'Para empezar, agrega al menos una API key gratuita en Configuración.',
+      en: 'To get started, add at least one free API key in Settings.'
     },
     placeholder: {
       es: 'Pregúntame sobre tus datos o pídeme crear algo... (ej: crea un panel de control)',
@@ -48,9 +48,42 @@ const I18n = {
       en: 'Chat cleared. What would you like to do?'
     },
     needApiKey: {
-      es: 'No hay API key configurada. Ingresa tu API key en Configuración.',
-      en: 'No API key configured. Enter your API key in Settings.'
+      es: 'No hay API key configurada. Agrega al menos una key gratuita en Configuración.',
+      en: 'No API key configured. Add at least one free key in Settings.'
     },
+
+    // --- Onboarding / provider settings ---
+    providersTitle: { es: 'Proveedores de IA', en: 'AI providers' },
+    providersHint: {
+      es: 'Agrega al menos una key. Con varias, el copiloto reparte las peticiones entre ellas y cambia de proveedor automáticamente al agotarse una cuota.',
+      en: 'Add at least one key. With several, the copilot spreads requests across them and switches provider automatically when a quota runs out.'
+    },
+    getKey:        { es: 'Obtener key gratis', en: 'Get free key' },
+    testKey:       { es: 'Probar',    en: 'Test' },
+    testing:       { es: 'Probando...', en: 'Testing...' },
+    testOk:        { es: (m) => `Conectado — modelo: ${m}`, en: (m) => `Connected — model: ${m}` },
+    testFailed:    { es: (e) => `Falló: ${e}`, en: (e) => `Failed: ${e}` },
+    noKeySet:      { es: 'Sin configurar', en: 'Not configured' },
+    advancedTitle: { es: 'Avanzado', en: 'Advanced' },
+    modelAuto:     { es: 'Automático (recomendado)', en: 'Automatic (recommended)' },
+    modelOverride: { es: 'Modelo fijo', en: 'Pinned model' },
+    resetQuota:    { es: 'Reiniciar contadores de cuota', en: 'Reset quota counters' },
+    quotaReset:    { es: 'Contadores de cuota reiniciados.', en: 'Quota counters reset.' },
+
+    // --- Quota bar ---
+    quotaTitle:     { es: 'Peticiones restantes hoy', en: 'Requests left today' },
+    quotaExhausted: { es: 'agotado', en: 'spent' },
+    quotaInvalid:   { es: 'key inválida', en: 'invalid key' },
+    quotaCooldown:  { es: 'en espera', en: 'cooling down' },
+    allQuotaSpent: {
+      es: 'Se agotó la cuota gratuita de todos los proveedores configurados. Agrega otra key en Configuración o vuelve a intentarlo mañana.',
+      en: 'The free quota of every configured provider is spent. Add another key in Settings or try again tomorrow.'
+    },
+    switchedProvider: {
+      es: (p) => `Cambiado a ${p} (el proveedor anterior estaba limitado)`,
+      en: (p) => `Switched to ${p} (previous provider was throttled)`
+    },
+    usingProvider: { es: (p, m) => `${p} · ${m}`, en: (p, m) => `${p} · ${m}` },
 
     // --- Status / live activity ---
     analyzing: { es: 'Analizando libro...', en: 'Analyzing workbook...' },
@@ -62,12 +95,22 @@ const I18n = {
     retryingMessage: { es: 'Reintentando...', en: 'Retrying...' },
     // --- Run status header (phase indicator) ---
     statusThinking:  { es: 'Pensando...',           en: 'Thinking...' },
-    statusReading:   { es: 'Leyendo datos...',      en: 'Reading data...' },
+    statusReading:   { es: 'Leyendo el libro...',   en: 'Reading workbook...' },
+    statusPlanning:  { es: 'Planificando...',       en: 'Planning...' },
     statusWriting:   { es: 'Escribiendo en Excel...', en: 'Writing to Excel...' },
     statusVerifying: { es: 'Verificando...',        en: 'Verifying...' },
+    statusRepairing: { es: 'Corrigiendo...',        en: 'Repairing...' },
     statusDone:      { es: 'Completado',            en: 'Completed' },
     statusError:     { es: 'Error',                 en: 'Error' },
     statusStopped:   { es: 'Detenido',              en: 'Stopped' },
+
+    // --- Plan checklist ---
+    planLabel:   { es: 'Plan', en: 'Plan' },
+    planSteps:   { es: (n) => `${n} paso(s)`, en: (n) => `${n} step(s)` },
+    callsUsed:   { es: (n) => `${n} llamada(s) a la IA`, en: (n) => `${n} AI call(s)` },
+    repairing:   { es: (n) => `Corrigiendo ${n} problema(s)...`, en: (n) => `Repairing ${n} issue(s)...` },
+    verifiedOk:  { es: 'Verificado sin errores', en: 'Verified, no errors' },
+    verifyIssues: { es: (n) => `${n} problema(s) tras la verificación`, en: (n) => `${n} issue(s) after verification` },
 
     // --- Stop / Undo ---
     stop:    { es: 'Detener',   en: 'Stop' },
@@ -96,7 +139,12 @@ const I18n = {
       autofit:               { es: 'Auto-ajustar',         en: 'Auto-fit' },
       insert_rows_cols:      { es: 'Insertar filas/cols',  en: 'Insert rows/cols' },
       delete_rows_cols:      { es: 'Eliminar filas/cols',  en: 'Delete rows/cols' },
-      sort_range:            { es: 'Ordenar rango',        en: 'Sort range' }
+      sort_range:            { es: 'Ordenar rango',        en: 'Sort range' },
+      freeze_panes:          { es: 'Inmovilizar paneles',  en: 'Freeze panes' },
+      'recipe.dashboard':    { es: 'Panel de control',     en: 'Dashboard' },
+      'recipe.summary_table':{ es: 'Tabla resumen',        en: 'Summary table' },
+      'recipe.kpi_row':      { es: 'Tarjetas de KPI',      en: 'KPI cards' },
+      'recipe.title_banner': { es: 'Banner de título',     en: 'Title banner' }
     },
 
     // --- Errors ---
@@ -105,7 +153,7 @@ const I18n = {
     genericError:  { es: 'Error',             en: 'Error' },
     retryButton:   { es: 'Reintentar',        en: 'Retry' },
 
-    // --- Groq API status messages ---
+    // --- Provider / transport status messages ---
     rateLimit: {
       es: (s) => `Límite de tasa — esperando ${s}s...`,
       en: (s) => `Rate limited — waiting ${s}s...`
@@ -114,31 +162,31 @@ const I18n = {
       es: (s) => `Error del servidor ${s}`,
       en: (s) => `Server error ${s}`
     },
+    authFailed: {
+      es: (p) => `${p}: la API key es inválida o no está autorizada. Verifícala en Configuración.`,
+      en: (p) => `${p}: API key is invalid or unauthorized. Check it in Settings.`
+    },
+    providerQuota: {
+      es: (p) => `${p}: cuota agotada.`,
+      en: (p) => `${p}: quota exhausted.`
+    },
+    providerRateLimited: {
+      es: (p) => `${p}: límite de tasa alcanzado.`,
+      en: (p) => `${p}: rate limit reached.`
+    },
     timeout: { es: 'Tiempo de espera agotado (180s)', en: 'Request timed out (180s)' },
     networkError: {
       es: (s) => `Error de red: ${s}`,
       en: (s) => `Network error: ${s}`
     },
     unknownError: { es: 'Error desconocido tras reintentos', en: 'Unknown error after retries' },
-    invalidKey: {
-      es: 'Tu API key es inválida. Verifícala en Configuración.',
-      en: 'Your API key is invalid. Check it in Settings.'
+    badPlan: {
+      es: 'El modelo no devolvió un plan válido. Intenta reformular tu solicitud.',
+      en: 'The model did not return a valid plan. Try rephrasing your request.'
     },
-    quotaExceeded: {
-      es: 'Cuota agotada en OpenRouter. Obtén tu propia key gratuita en openrouter.ai/keys e ingrésala en Configuración.',
-      en: 'OpenRouter quota exhausted. Get your own free key at openrouter.ai/keys and enter it in Settings.'
-    },
-    keyStatusUser: {
-      es: 'Usando tu API key',
-      en: 'Using your API key'
-    },
-    keyStatusPreset: {
-      es: 'Usando key compartida (puede tener límites)',
-      en: 'Using shared key (may have limits)'
-    },
-    keyStatusNone: {
-      es: 'Sin API key',
-      en: 'No API key'
+    emptyWorkbook: {
+      es: 'El libro parece estar vacío. Agrega tus datos en Excel e inténtalo de nuevo.',
+      en: 'The workbook looks empty. Add your data in Excel and try again.'
     }
   },
 

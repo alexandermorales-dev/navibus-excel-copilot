@@ -9,7 +9,7 @@
   <title>Excel AI Copilot</title>
   <!-- Office.js API from CDN -->
   <script src="https://appsforoffice.microsoft.com/lib/1.1/hosted/office.js"></script>
-  <link rel="stylesheet" href="css/style.css?v=17" />
+  <link rel="stylesheet" href="css/style.css?v=40" />
 </head>
 <body>
   <div id="app">
@@ -27,39 +27,26 @@
       </button>
     </header>
 
+    <!-- Quota bar: pooled free-tier requests remaining today -->
+    <div id="quotaBar" class="quota-bar hidden"></div>
+
     <!-- Settings Panel (hidden by default) -->
     <div id="settingsPanel" class="settings-panel hidden">
-      <div class="settings-row">
-        <label for="apiKeyInput">API Key</label>
-        <div class="api-key-wrapper">
-          <input type="password" id="apiKeyInput" placeholder="sk-or-v1-..." autocomplete="off" />
-          <button type="button" id="apiKeyToggle" class="api-key-toggle" title="Show/Hide" aria-label="Toggle API key visibility">
-            <svg class="icon-eye" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-              <circle cx="12" cy="12" r="3"/>
-            </svg>
-            <svg class="icon-eye-off hidden" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
-              <line x1="1" y1="1" x2="23" y2="23"/>
-            </svg>
-          </button>
+      <div class="settings-section">
+        <h3 class="settings-title" data-i18n="providersTitle">Proveedores de IA</h3>
+        <p class="settings-hint" data-i18n="providersHint"></p>
+        <!-- One row per provider, rendered by app.js from the Providers registry -->
+        <div id="providerList" class="provider-list"></div>
+      </div>
+
+      <details class="settings-section">
+        <summary class="settings-title" data-i18n="advancedTitle">Avanzado</summary>
+        <div id="advancedList" class="advanced-list"></div>
+        <div class="settings-row">
+          <button id="resetQuotaBtn" class="btn-secondary" data-i18n="resetQuota">Reiniciar contadores de cuota</button>
         </div>
-        <p class="settings-hint">Optional — a preset key is included. Get your own free key at <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai/keys</a></p>
-        <p id="keyStatus" class="key-status"></p>
-      </div>
-      <div class="settings-row">
-        <label for="geminiKeyInput">Gemini API Key (Supervisor)</label>
-        <input type="password" id="geminiKeyInput" placeholder="AIza..." autocomplete="off" />
-        <p class="settings-hint">Optional — enables AI supervisor that guides the agent. Free key at <a href="https://aistudio.google.com/app/apikey" target="_blank">aistudio.google.com</a></p>
-      </div>
-      <div class="settings-row">
-        <label for="modelSelect">Model</label>
-        <select id="modelSelect">
-          <option value="smart">Smart Routing (recommended — fast for simple, capable for complex)</option>
-          <option value="dots-studio/dots-3-note-preview:free">Dots3-Note 280B (always capable)</option>
-          <option value="nvidia/nemotron-3.5-lightning:free">Nemotron 30B (always fast)</option>
-        </select>
-      </div>
+      </details>
+
       <div class="settings-row">
         <button id="clearChatBtn" class="btn-secondary" data-i18n="clearChat">Borrar conversación</button>
       </div>
@@ -92,16 +79,23 @@
     </div>
   </div>
 
-  <!-- Scripts (cache-busted: change ?v= when updating) -->
-  <script src="js/config.js?v=35"></script>
-  <script src="js/i18n.js?v=35"></script>
-  <script src="js/groq.js?v=35"></script>
-  <script src="js/schema.js?v=35"></script>
-  <script src="js/journal.js?v=35"></script>
-  <script src="js/tools.js?v=35"></script>
-  <script src="js/prompt.js?v=35"></script>
-  <script src="js/supervisor.js?v=35"></script>
-  <script src="js/agent.js?v=35"></script>
-  <script src="js/app.js?v=35"></script>
+  <!-- Scripts (cache-busted: change ?v= when updating).
+       Load order matters: config/i18n first, then the provider+transport
+       layer, then Office.js-backed modules, then the orchestrator. -->
+  <script src="js/config.js?v=40"></script>
+  <script src="js/i18n.js?v=40"></script>
+  <script src="js/providers.js?v=40"></script>
+  <script src="js/quota.js?v=40"></script>
+  <script src="js/llm.js?v=40"></script>
+  <script src="js/schema.js?v=40"></script>
+  <script src="js/journal.js?v=40"></script>
+  <script src="js/tools.js?v=40"></script>
+  <script src="js/recipes.js?v=40"></script>
+  <script src="js/ops.js?v=40"></script>
+  <script src="js/context.js?v=40"></script>
+  <script src="js/prompt.js?v=40"></script>
+  <script src="js/intent.js?v=40"></script>
+  <script src="js/agent.js?v=40"></script>
+  <script src="js/app.js?v=40"></script>
 </body>
 </html>

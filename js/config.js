@@ -1,121 +1,142 @@
 /* ============================================
-   config.js — Settings & state management
-   API key via OpenRouter (preset + user-provided).
+   config.js — Persistent storage + settings
+
+   Store: a three-layer persistence helper. Office roamingSettings is
+   the only layer that reliably survives an Excel relaunch; localStorage
+   is a fallback; an in-memory map covers WebViews that block both.
+
+   Config: per-provider API keys, model overrides, and the cached model
+   lists from provider discovery.
+
+   NOTE: this file previously shipped a shared OpenRouter key baked into
+   a public repository. It has been removed — every user brings their own
+   key, so nobody shares (or can drain) anyone else's free-tier quota.
    ============================================ */
 
-const Config = {
-  apiKey: '',
-  geminiApiKey: '',
-  _memoryKey: '',  // fallback when all storage is blocked
-  _geminiMemoryKey: '',
-  model: 'smart',              // 'smart' | capable model | fast model
-  fastModel: 'nvidia/nemotron-3-nano-30b-a3b:free',
-  capableModel: 'nvidia/nemotron-3-super-120b-a12b:free',
+const Store = {
+  _memory: {},
 
-  // Preset key — char-code encoded to bypass secret scanning, decoded at runtime
-  // (atob/base64 doesn't work reliably in Excel WebView)
-  _presetKeyCodes: [115,107,45,111,114,45,118,49,45,50,51,50,56,57,53,56,51,54,51,98,50,53,99,54,99,102,48,99,57,97,53,52,97,100,101,52,51,54,101,54,49,55,56,50,49,50,101,48,50,98,53,101,97,57,99,55,97,99,51,102,98,50,55,52,48,50,97,54,48,51,102,54,54],
-
-  get presetKey() {
-    return String.fromCharCode.apply(null, this._presetKeyCodes);
-  },
-
-  // Returns the active API key: user's key first, preset key as fallback.
-  get activeKey() {
-    const key = (this._memoryKey && this._memoryKey.length > 0)
-      ? this._memoryKey
-      : (this.apiKey && this.apiKey.length > 0)
-        ? this.apiKey
-        : this.presetKey;
-    return key;
-  },
-
-  /**
-   * Read a value from the most persistent storage available.
-   * Priority: Office roamingSettings > localStorage > null.
-   * roamingSettings persists across sessions per user in Excel.
-   */
-  _read(key) {
-    // Try Office.js roamingSettings first (survives relaunch)
+  get(key) {
+    if (Object.prototype.hasOwnProperty.call(this._memory, key)) {
+      return this._memory[key];
+    }
     try {
       if (typeof Office !== 'undefined' && Office.context && Office.context.roamingSettings) {
         const val = Office.context.roamingSettings.get(key);
-        if (val) return val;
+        if (val !== null && val !== undefined) {
+          this._memory[key] = val;
+          return val;
+        }
       }
-    } catch (e) { /* roamingSettings not available */ }
-    // Fallback to localStorage (cleared on relaunch in some WebViews)
+    } catch (e) { /* roamingSettings unavailable */ }
     try {
-      return localStorage.getItem(key) || null;
-    } catch (e) {
-      return null;
-    }
+      const val = localStorage.getItem(key);
+      if (val !== null) {
+        this._memory[key] = val;
+        return val;
+      }
+    } catch (e) { /* localStorage blocked */ }
+    return null;
   },
 
-  /**
-   * Write a value to all available storage layers.
-   */
-  _write(key, value) {
+  set(key, value) {
+    this._memory[key] = value;
     try {
       if (typeof Office !== 'undefined' && Office.context && Office.context.roamingSettings) {
         Office.context.roamingSettings.set(key, value);
         Office.context.roamingSettings.saveAsync();
       }
-    } catch (e) { /* roamingSettings not available */ }
+    } catch (e) { /* roamingSettings unavailable */ }
     try {
       localStorage.setItem(key, value);
     } catch (e) { /* localStorage blocked */ }
   },
 
-  _remove(key) {
+  remove(key) {
+    delete this._memory[key];
     try {
       if (typeof Office !== 'undefined' && Office.context && Office.context.roamingSettings) {
         Office.context.roamingSettings.remove(key);
         Office.context.roamingSettings.saveAsync();
       }
-    } catch (e) {}
+    } catch (e) { /* roamingSettings unavailable */ }
     try {
       localStorage.removeItem(key);
-    } catch (e) {}
+    } catch (e) { /* localStorage blocked */ }
   },
+
+  getJSON(key, fallback) {
+    const raw = this.get(key);
+    if (!raw) return fallback;
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      return fallback;
+    }
+  },
+
+  setJSON(key, value) {
+    try {
+      this.set(key, JSON.stringify(value));
+    } catch (e) { /* unserializable — ignore */ }
+  }
+};
+
+const Config = {
+  // Per-provider API keys, keyed by provider id.
+  keys: {},
+  // Optional per-provider model override chosen by the user in Settings.
+  overrides: {},
 
   load() {
-    this.apiKey = this._read('openrouter_api_key') || '';
-    this.geminiApiKey = this._read('gemini_api_key') || '';
-    this.model = this._read('groq_model') || 'smart';
-  },
-
-  save() {
-    this._memoryKey = this.apiKey;
-    this._geminiMemoryKey = this.geminiApiKey;
-    this._write('openrouter_api_key', this.apiKey);
-    this._write('gemini_api_key', this.geminiApiKey);
-    this._write('groq_model', this.model);
-  },
-
-  hasApiKey() {
-    return !!(this.activeKey && this.activeKey.length > 0);
-  },
-
-  /**
-   * Returns 'user' if the user's own key is active, 'preset' if falling
-   * back to the shared preset key, or 'none' if no key at all.
-   */
-  get keySource() {
-    if (this._memoryKey && this._memoryKey.length > 0) return 'user';
-    if (this.apiKey && this.apiKey.length > 0) return 'user';
-    if (this.presetKey && this.presetKey.length > 0) return 'preset';
-    return 'none';
-  },
-
-  /**
-   * Clear the user's API key from memory, storage, and the Settings UI.
-   */
-  clearUserKey() {
-    this.apiKey = '';
-    this._memoryKey = '';
-    this._remove('openrouter_api_key');
-    if (typeof App !== 'undefined' && App.el && App.el.apiKeyInput) {
-      App.el.apiKeyInput.value = '';
+    for (const id of Providers.ids()) {
+      this.keys[id] = Store.get(`key_${id}`) || '';
+      this.overrides[id] = Store.get(`model_${id}`) || '';
+      const models = Store.getJSON(`models_${id}`, null);
+      if (Array.isArray(models) && models.length > 0) {
+        Providers.discovered[id] = models;
+      }
     }
+  },
+
+  keyFor(providerId) {
+    return this.keys[providerId] || '';
+  },
+
+  setKey(providerId, value) {
+    const key = (value || '').trim();
+    this.keys[providerId] = key;
+    if (key) Store.set(`key_${providerId}`, key);
+    else Store.remove(`key_${providerId}`);
+  },
+
+  modelOverride(providerId) {
+    return this.overrides[providerId] || '';
+  },
+
+  setModelOverride(providerId, model) {
+    this.overrides[providerId] = model || '';
+    if (model) Store.set(`model_${providerId}`, model);
+    else Store.remove(`model_${providerId}`);
+  },
+
+  saveDiscovered(providerId, models) {
+    Store.setJSON(`models_${providerId}`, models);
+  },
+
+  loadDiscovered(providerId) {
+    return Store.getJSON(`models_${providerId}`, null);
+  },
+
+  /**
+   * True when at least one provider has a key — the app is usable with
+   * a single key configured.
+   */
+  hasApiKey() {
+    return Providers.ids().some(id => !!this.keys[id]);
+  },
+
+  configuredCount() {
+    return Providers.ids().filter(id => !!this.keys[id]).length;
   }
 };
