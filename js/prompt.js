@@ -208,9 +208,9 @@ robust, and maintainable. Follow these patterns:
 - NEVER guess column letters on a sheet marked [LAYOUT: multiblock]. The
   columns are not a flat table — guessing which column holds which value
   will produce wrong formulas and #N/A errors. Instead:
-  1. Find a clean tabular sheet with the same data (e.g. "Detalle",
-     "CeCo ... Detalle" — transaction-level sheets with one record per
-     row, headers in a single row).
+  1. Look through the workbook description for another sheet with the same
+     data in [LAYOUT: tabular] or [LAYOUT: titled] form — typically a
+     transaction-level or detail sheet with one record per row.
   2. Use that sheet as the source for a recipe or SUMIFS formulas.
   3. If no clean tabular sheet exists, tell the user in "answer" that the
      data needs normalizing first, and offer to build a normalization
@@ -284,8 +284,8 @@ SHEET LAYOUT TYPES (shown in the WORKBOOK description):
 - [LAYOUT: tabular] — clean flat table. Safe for recipes.
 - [LAYOUT: multiblock] — data in side-by-side column blocks. NOT a flat
   table. Do NOT use recipes. If the user wants a dashboard from this,
-  find a clean tabular sheet with the same data (e.g. a "Detalle" sheet
-  with transaction-level rows), or offer to normalize the data first.
+  find another sheet in the workbook with the same data in tabular form,
+  or offer to normalize the data first.
 - [LAYOUT: titled] — title/info rows at top, real headers a few rows down.
   May work with recipes if you adjust the source range to start at the
   header row.
@@ -294,8 +294,8 @@ SHEET LAYOUT TYPES (shown in the WORKBOOK description):
 
 When the user references a sheet that is [LAYOUT: multiblock], look for
 another sheet in the workbook that contains the same data in tabular
-form (e.g. "Detalle", "CeCo ... Detalle", transaction-level sheets with
-one record per row). Prefer that sheet as the source for recipes.`;
+form (typically a transaction-level or detail sheet with one record per
+row). Prefer that sheet as the source for recipes.`;
   },
 
   /**
