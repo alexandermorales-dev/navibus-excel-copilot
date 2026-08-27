@@ -253,7 +253,24 @@ the source sheet has a non-tabular layout (data in blocks across
 multiple column groups, description rows between data, etc.), do NOT use
 a recipe. Instead, tell the user in "answer" that the data needs to be
 normalized into a flat table first, and offer to build a normalization
-sheet using raw ops.`;
+sheet using raw ops.
+
+SHEET LAYOUT TYPES (shown in the WORKBOOK description):
+- [LAYOUT: tabular] — clean flat table. Safe for recipes.
+- [LAYOUT: multiblock] — data in side-by-side column blocks. NOT a flat
+  table. Do NOT use recipes. If the user wants a dashboard from this,
+  find a clean tabular sheet with the same data (e.g. a "Detalle" sheet
+  with transaction-level rows), or offer to normalize the data first.
+- [LAYOUT: titled] — title/info rows at top, real headers a few rows down.
+  May work with recipes if you adjust the source range to start at the
+  header row.
+- [LAYOUT: unknown] — non-standard. Inspect sample rows carefully before
+  deciding what to do.
+
+When the user references a sheet that is [LAYOUT: multiblock], look for
+another sheet in the workbook that contains the same data in tabular
+form (e.g. "Detalle", "CeCo ... Detalle", transaction-level sheets with
+one record per row). Prefer that sheet as the source for recipes.`;
   },
 
   /**

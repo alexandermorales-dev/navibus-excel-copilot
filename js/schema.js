@@ -114,6 +114,11 @@ const Schema = {
     const firstRow = values[0] || [];
     const isHeader = this.looksLikeHeader(firstRow);
 
+    // Detect non-tabular layouts: multi-block columns, merged header rows,
+    // or data starting several rows down. This helps the model choose the
+    // right approach (recipe vs raw ops vs "normalize first").
+    const layoutType = this.detectLayout(values, isHeader, rowCount, colCount);
+
     let headers = [];
     let sampleRows = [];
     let columnTypes = [];
@@ -153,6 +158,7 @@ const Schema = {
       rows: rowCount,
       cols: colCount,
       hasHeaders: isHeader,
+      layoutType: layoutType,
       headers: headers,
       columnTypes: columnTypes,
       columnStats: columnStats,
@@ -224,6 +230,94 @@ const Schema = {
     // At least 80% of non-empty cells should be text (not pure numbers)
     const textCount = nonEmpty.filter(v => typeof v === 'string').length;
     return textCount / nonEmpty.length >= 0.8;
+  },
+
+  /**
+   * Detect the overall layout of a sheet. This helps the model understand
+   * what it's looking at and choose the right approach:
+   *
+   *   'tabular'    — clean flat table, headers in row 1, one record per row
+   *   'titled'     — title/info rows at top, tabular data starts a few rows down
+   *   'multiblock' — data laid out in side-by-side column blocks (e.g. one
+   *                  block per ship/department), not a flat table
+   *   'unknown'    — can't determine, treat with caution
+   */
+  detectLayout(values, isHeader, rowCount, colCount) {
+    if (!values || values.length === 0) return 'unknown';
+
+    // First, check for titled layout: first few rows are sparse, then
+    // a header row appears. This takes priority over multiblock because
+    // a titled sheet may have empty columns in the title rows that would
+    // falsely trigger multiblock detection.
+    if (!isHeader && rowCount > 5) {
+      for (let r = 1; r < Math.min(8, values.length); r++) {
+        if (this.looksLikeHeader(values[r])) {
+          // Found a header row below row 1. Now check if the data below
+          // it is clean tabular (no empty separator columns in data rows).
+          const dataStart = r + 1;
+          if (dataStart < values.length) {
+            // Check column density in data rows — if most columns have
+            // data, it's a titled tabular sheet, not multiblock.
+            let dataCols = 0;
+            for (let c = 0; c < colCount; c++) {
+              for (let dr = dataStart; dr < Math.min(values.length, dataStart + 10); dr++) {
+                if (values[dr] && values[dr][c] !== null && values[dr][c] !== '' && values[dr][c] !== undefined) {
+                  dataCols++;
+                  break;
+                }
+              }
+            }
+            // If >70% of columns have data, it's titled tabular.
+            if (dataCols / colCount > 0.7) return 'titled';
+          }
+          // Header found but data is sparse — could be multiblock with
+          // a title above. Fall through to multiblock check.
+          break;
+        }
+      }
+    }
+
+    // Check for multi-block: large column count relative to data density,
+    // with empty column gaps (columns that are entirely empty in a way
+    // that separates blocks). Only check data rows (skip title rows).
+    if (colCount > 10) {
+      // Find the first row with substantial data (3+ non-empty cells).
+      let dataStartRow = 0;
+      for (let r = 0; r < Math.min(values.length, 10); r++) {
+        const nonEmpty = (values[r] || []).filter(v => v !== null && v !== '' && v !== undefined).length;
+        if (nonEmpty >= 3) { dataStartRow = r; break; }
+      }
+
+      // Find columns that are entirely empty across data rows — these
+      // act as separators between blocks.
+      const emptyCols = [];
+      for (let c = 0; c < colCount; c++) {
+        let hasData = false;
+        for (let r = dataStartRow; r < Math.min(values.length, dataStartRow + 20); r++) {
+          if (values[r] && values[r][c] !== null && values[r][c] !== '' && values[r][c] !== undefined) {
+            hasData = true;
+            break;
+          }
+        }
+        if (!hasData) emptyCols.push(c);
+      }
+      // If there are 2+ empty separator columns with data blocks between
+      // them, it's a multi-block layout.
+      if (emptyCols.length >= 2) {
+        let blocks = 1;
+        for (let i = 1; i < emptyCols.length; i++) {
+          if (emptyCols[i] - emptyCols[i - 1] > 1) blocks++;
+        }
+        if (blocks >= 2) return 'multiblock';
+      }
+    }
+
+    // Check for very wide sheets (100+ cols) that aren't real tables —
+    // often formatting artifacts or pivot cache sheets.
+    if (colCount > 100 && rowCount < 200) return 'unknown';
+
+    if (isHeader) return 'tabular';
+    return 'unknown';
   },
 
   inferColumnTypes(colCount, values, formats, startRow = 1) {
@@ -344,7 +438,10 @@ const Schema = {
       }
 
       const copilotTag = s.isCopilotSheet ? ' [previous copilot output — not source data]' : '';
-      lines.push(`  - "${s.name}": ${s.rows} rows x ${s.cols} cols, used range ${s.address}${copilotTag}`);
+      const layout = s.layoutType && s.layoutType !== 'tabular'
+        ? ` [LAYOUT: ${s.layoutType}${s.layoutType === 'multiblock' ? ' — data is in side-by-side column blocks, NOT a flat table. Do NOT use recipes on this sheet. Use raw ops or reference a clean tabular sheet instead.' : s.layoutType === 'titled' ? ' — title rows at top, tabular data starts a few rows down' : ' — non-standard layout, inspect sample rows carefully'}]`
+        : '';
+      lines.push(`  - "${s.name}": ${s.rows} rows x ${s.cols} cols, used range ${s.address}${copilotTag}${layout}`);
 
       if (!s.hasHeaders) {
         lines.push('    (no clear header row)');
