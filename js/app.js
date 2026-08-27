@@ -599,9 +599,10 @@ const App = {
     const msg = document.createElement('div');
     msg.className = `message ${role}`;
     const avatar = role === 'user' ? 'You' : role === 'system' ? '!' : 'AI';
+    const formatted = role === 'user' ? this.formatContent(this.escapeHtml(text)) : this.formatMarkdown(text);
     msg.innerHTML = `
       <div class="message-avatar">${avatar}</div>
-      <div class="message-content">${this.formatContent(this.escapeHtml(text))}</div>
+      <div class="message-content">${formatted}</div>
     `;
     this.el.messageList.appendChild(msg);
     this.scrollToBottom();
@@ -614,7 +615,7 @@ const App = {
     msg.innerHTML = `
       <div class="message-avatar">!</div>
       <div class="message-content">
-        <p>${this.formatContent(this.escapeHtml(text))}</p>
+        <p>${this.formatMarkdown(text)}</p>
         <button type="button" class="btn-retry">${this.escapeHtml(I18n.t('retryButton'))}</button>
       </div>
     `;
@@ -662,8 +663,9 @@ const App = {
 
   /**
    * Minimal Markdown rendering for final answers: bold, italic, inline code,
-   * bullet lists, numbered lists, and paragraphs. Keeps output safe (escapes
-   * HTML first) and simple (no full parser).
+   * bullet lists, numbered lists, headers, blockquotes, horizontal rules,
+   * and paragraphs. Keeps output safe (escapes HTML first) and simple
+   * (no full parser).
    */
   formatMarkdown(text) {
     let s = this.escapeHtml(text);
@@ -685,12 +687,27 @@ const App = {
 
     for (let raw of lines) {
       const line = raw.trim();
-      if (/^[-*]\s+/.test(line)) {
+      if (/^###\s+/.test(line)) {
+        closeLists();
+        out.push(`<h4>${line.replace(/^###\s+/, '')}</h4>`);
+      } else if (/^##\s+/.test(line)) {
+        closeLists();
+        out.push(`<h3>${line.replace(/^##\s+/, '')}</h3>`);
+      } else if (/^#\s+/.test(line)) {
+        closeLists();
+        out.push(`<h3>${line.replace(/^#\s+/, '')}</h3>`);
+      } else if (/^[-*]\s+/.test(line)) {
         if (!inUl) { closeLists(); out.push('<ul>'); inUl = true; }
         out.push(`<li>${line.replace(/^[-*]\s+/, '')}</li>`);
       } else if (/^\d+\.\s+/.test(line)) {
         if (!inOl) { closeLists(); out.push('<ol>'); inOl = true; }
         out.push(`<li>${line.replace(/^\d+\.\s+/, '')}</li>`);
+      } else if (/^>\s+/.test(line)) {
+        closeLists();
+        out.push(`<blockquote>${line.replace(/^>\s+/, '')}</blockquote>`);
+      } else if (/^---+$/.test(line) || /^\*\*\*+$/.test(line)) {
+        closeLists();
+        out.push('<hr>');
       } else if (line === '') {
         closeLists();
         out.push('');

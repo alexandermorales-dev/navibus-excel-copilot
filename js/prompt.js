@@ -85,7 +85,7 @@ Reply with a single JSON object and nothing else. No prose, no code fences.
 
 {
   "intent": "${intent}",
-  "answer": "Short message for the user. Markdown allowed. Do NOT invent numbers here; verified values are appended automatically.",
+  "answer": "Message for the user. Markdown allowed: **bold** for key figures, bullet lists for steps, \`code\` for formulas. Do NOT invent numbers here; verified values are appended automatically. Explain WHAT you built and WHY, in 1-3 sentences. If there were limitations or assumptions, mention them briefly.",
   "ops": [ ... ordered operations, may be empty for questions ... ]
 }
 ${needsBlock}`;
@@ -191,7 +191,14 @@ robust, and maintainable. Follow these patterns:
   decimals, "$#,##0.00" currency, "0.0%" percent, "yyyy-mm-dd" dates.
 - Keep the plan tight. Ten good ops beat forty redundant ones. If your
   plan exceeds 20 ops, you are probably hand-building something a recipe
-  can do in one op.`;
+  can do in one op.
+- Make outputs logically sound. A "total" row should sum the rows above
+  it. A "percentage" column should add up to 100%. A "growth rate" should
+  use (new-old)/old, not new/old. A KPI should answer the user's actual
+  question, not just show the first numeric column you found.
+- If the user's request is ambiguous (e.g. "analyze the data" without
+  specifics), make reasonable choices in "answer" and plan ops that cover
+  the most likely intent. Do not refuse — build something useful.`;
   },
 
   /**
@@ -299,7 +306,14 @@ dashboard sheet — recipes set deliberate column widths.
 - Cite real values only. If the data cannot answer the question, say so and
   name what is missing.
 - "ops" must be an empty array: answer in "answer", do not modify the workbook.
-- Be concise: 1-4 sentences. Bold the key figures with **markdown**.`;
+- Be analytical, not just factual. If asked "how are sales doing?", don't
+  just quote the total — compare it to the average, note trends, highlight
+  outliers. Provide context and interpretation, not raw numbers.
+- Use **bold** for key figures, bullet lists for breakdowns, and \`code\`
+  for formula examples if the user asks how something was calculated.
+- Keep it concise: 2-5 sentences. Lead with the answer, then context.
+- If the question implies the user wants to DO something (e.g. "can you
+  show me..."), do not just answer — set "intent" to "build" and plan ops.`;
   },
 
   explainRules() {

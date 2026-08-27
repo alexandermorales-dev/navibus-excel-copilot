@@ -419,6 +419,17 @@ summary.settings-title {
   color: white;
 }
 
+.message.system .message-content {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+.message.system .message-content p {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .message-content {
   flex: 1;
   min-width: 0;
@@ -1116,21 +1127,33 @@ summary.settings-title {
 /* Final answer (standalone message after the run) */
 .final-answer {
   font-size: 13px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
 .final-answer p {
-  margin-bottom: 6px;
+  margin-bottom: 8px;
 }
 .final-answer p:last-child {
   margin-bottom: 0;
 }
+.final-answer h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 10px 0 4px 0;
+}
+.final-answer h4 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 8px 0 3px 0;
+}
 .final-answer ul,
 .final-answer ol {
-  margin: 4px 0 6px 18px;
+  margin: 4px 0 8px 18px;
 }
 .final-answer li {
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 .final-answer code {
   font-family: var(--font-mono);
@@ -1138,10 +1161,67 @@ summary.settings-title {
   background: var(--bg-tertiary);
   padding: 1px 5px;
   border-radius: 3px;
+  color: var(--accent);
 }
 .final-answer strong {
   color: var(--accent);
   font-weight: 600;
+}
+.final-answer em {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+.final-answer blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 4px 10px;
+  margin: 6px 0;
+  color: var(--text-secondary);
+  background: rgba(74, 158, 255, 0.05);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.final-answer hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 10px 0;
+}
+
+/* Rich markdown for assistant messages (showAsMessage, addMessage) */
+.message.assistant .message-content h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 8px 0 4px 0;
+}
+.message.assistant .message-content h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 6px 0 3px 0;
+}
+.message.assistant .message-content ul,
+.message.assistant .message-content ol {
+  margin: 4px 0 6px 18px;
+}
+.message.assistant .message-content li {
+  margin-bottom: 3px;
+}
+.message.assistant .message-content blockquote {
+  border-left: 3px solid var(--accent);
+  padding: 4px 10px;
+  margin: 6px 0;
+  color: var(--text-secondary);
+  background: rgba(74, 158, 255, 0.05);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.message.assistant .message-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 8px 0;
+}
+.message.assistant .message-content strong {
+  color: var(--accent);
+  font-weight: 600;
+}
+.message.assistant .message-content em {
+  color: var(--text-secondary);
 }
 
 /* Stop button (in input area) */
