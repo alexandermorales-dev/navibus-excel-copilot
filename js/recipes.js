@@ -162,7 +162,11 @@ const Recipes = {
   colRange(src, header) {
     const idx = Context.columnIndex(src.desc, header);
     if (idx < 0) return null;
-    const letter = Tools.colToLetter(idx + 1);
+    // Account for the used range's start column (e.g. B6:Q2879 starts at B,
+    // so header index 0 maps to column B, not A).
+    const bounds = Schema.parseAddress(src.desc.address);
+    const startColNum = bounds ? Schema.letterToCol(bounds.startCol) : 1;
+    const letter = Tools.colToLetter(startColNum + idx);
     return {
       letter,
       idx,

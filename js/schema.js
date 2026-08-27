@@ -139,6 +139,23 @@ const Schema = {
       }
       // Compute numeric stats over all loaded data rows
       columnStats = this.computeColumnStats(headers, values, columnTypes, 1);
+    } else if (layoutType === 'titled' && headerRowIndex > 0) {
+      // Titled sheet: headers are at headerRowIndex (1-based), data starts
+      // below. Read the header row and treat it like a tabular sheet.
+      const hdrIdx = headerRowIndex - 1;  // convert to 0-based array index
+      const headerRow = values[hdrIdx] || [];
+      headers = headerRow.map(v => String(v));
+      // Infer types from data rows (below header)
+      columnTypes = this.inferColumnTypes(headers.length, values, safeFormats, headerRowIndex);
+      // Sample data rows below the header
+      const sampleCount = Math.min(this.SAMPLE_ROWS, values.length - headerRowIndex);
+      for (let i = headerRowIndex; i < headerRowIndex + sampleCount; i++) {
+        if (values[i]) {
+          sampleRows.push(values[i].map((v, c) => this.formatValue(v, columnTypes[c])));
+        }
+      }
+      // Compute stats from data rows
+      columnStats = this.computeColumnStats(headers, values, columnTypes, headerRowIndex);
     } else {
       // No clear header — infer types starting from row 0
       columnTypes = this.inferColumnTypes(colCount, values, safeFormats, 0);
@@ -150,8 +167,12 @@ const Schema = {
       }
     }
 
-    const sampleRowCount = isHeader
-      ? Math.min(this.SAMPLE_ROWS, rowCount - 1)
+    // For titled sheets, hasHeaders is false but we populated headers.
+    // Set a flag so toText knows to show them.
+    const effectiveHasHeaders = isHeader || (layoutType === 'titled' && headers.length > 0);
+
+    const sampleRowCount = effectiveHasHeaders
+      ? Math.min(this.SAMPLE_ROWS, rowCount - (headerRowIndex || 1))
       : Math.min(this.SAMPLE_ROWS, rowCount);
 
     return {
@@ -159,7 +180,7 @@ const Schema = {
       empty: false,
       rows: rowCount,
       cols: colCount,
-      hasHeaders: isHeader,
+      hasHeaders: effectiveHasHeaders,
       layoutType: layoutType,
       headerRowIndex: headerRowIndex,
       headers: headers,
@@ -167,9 +188,9 @@ const Schema = {
       columnStats: columnStats,
       sampleRows: sampleRows,
       address: usedRange.address,
-      truncated: isHeader ? (rowCount - 1) > sampleRowCount : rowCount > sampleRowCount,
+      truncated: effectiveHasHeaders ? (rowCount - (headerRowIndex || 1)) > sampleRowCount : rowCount > sampleRowCount,
       statsPartial: isLarge,
-      statsRowCount: isHeader ? statsRowCount : 0
+      statsRowCount: effectiveHasHeaders ? statsRowCount : 0
     };
   },
 
@@ -406,6 +427,17 @@ const Schema = {
   },
 
   /**
+   * Convert Excel column letter(s) to a 1-based column index.
+   */
+  letterToCol(letters) {
+    let n = 0;
+    for (let i = 0; i < letters.length; i++) {
+      n = n * 26 + (letters.charCodeAt(i) - 64);
+    }
+    return n;
+  },
+
+  /**
    * Detail levels for snapshot rendering. The snapshot is injected into
    * every planning prompt, so its size directly drives token cost — and on
    * providers whose free tier binds on tokens-per-minute, size decides
@@ -443,7 +475,7 @@ const Schema = {
 
       const copilotTag = s.isCopilotSheet ? ' [previous copilot output — not source data]' : '';
       const layout = s.layoutType && s.layoutType !== 'tabular'
-        ? ` [LAYOUT: ${s.layoutType}${s.layoutType === 'multiblock' ? ' — data is in side-by-side column blocks, NOT a flat table. Do NOT reference individual cells from this sheet (e.g. =DC!F8) — you cannot know which column holds which value. Do NOT use recipes on this sheet. Find a clean tabular sheet in this workbook with the same data and use that instead.' : s.layoutType === 'titled' ? ' — title rows at top, tabular data starts a few rows down' : ' — non-standard layout, inspect sample rows carefully'}]`
+        ? ` [LAYOUT: ${s.layoutType}${s.layoutType === 'multiblock' ? ' — data is in side-by-side column blocks, NOT a flat table. Do NOT reference individual cells from this sheet (e.g. =DC!F8) — you cannot know which column holds which value. Do NOT use recipes on this sheet. Find a clean tabular sheet in this workbook with the same data and use that instead.' : s.layoutType === 'titled' ? ` — title rows at top, headers in row ${s.headerRowIndex}, data starts row ${s.headerRowIndex + 1}` : ' — non-standard layout, inspect sample rows carefully'}]`
         : '';
       lines.push(`  - "${s.name}": ${s.rows} rows x ${s.cols} cols, used range ${s.address}${copilotTag}${layout}`);
 
@@ -455,7 +487,10 @@ const Schema = {
 
       // Pair each header with its column letter so the model can build
       // ranges without guessing which letter a column lives in.
-      const cols = s.headers.map((h, i) => `${this.colToLetter(i + 1)}="${h}"`);
+      // Account for the used range's start column (e.g. B6:Q2879 starts at B).
+      const bounds = this.parseAddress(s.address);
+      const startColNum = bounds ? this.letterToCol(bounds.startCol) : 1;
+      const cols = s.headers.map((h, i) => `${this.colToLetter(startColNum + i)}="${h}"`);
       lines.push(`    Columns: ${cols.join(', ')}`);
 
       if (cfg.types && s.columnTypes.length > 0) {

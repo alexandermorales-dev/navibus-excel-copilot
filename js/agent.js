@@ -109,8 +109,6 @@ const Agent = {
 
       /* ---------- 4. Validate (local, free) ---------- */
       const validation = Ops.validate(plan, snap);
-      console.log('Agent: plan ops:', JSON.stringify(plan.ops?.map(o => o.op), null, 2));
-      console.log('Agent: validated ops:', validation.ops.length, 'dropped:', validation.dropped.length);
       if (!validation.ok) return this._fail(I18n.t('badPlan'), stats);
       warnings.push(...validation.warnings);
 
