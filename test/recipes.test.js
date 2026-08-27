@@ -31,12 +31,23 @@ function setup() {
 
 /**
  * Context stub: readRange returns the group-by column values so the
- * recipe can compute its distinct categories without Excel.
+ * recipe can compute its distinct categories without Excel. When the
+ * aggregate method reads the value column, the stub returns numeric
+ * values matching the category count so the numeric-data check passes.
  */
 function ctxWith(categories) {
+  const values = categories.map((_, i) => [100 + i * 10]);
+  let callCount = 0;
   return {
     snap: snapshot(),
-    readRange: async () => ({ ok: true, data: categories.map(c => [c]), truncated: false })
+    readRange: async () => {
+      callCount++;
+      // First call: group-by column (categories). Second call: value column (numbers).
+      if (callCount === 1) {
+        return { ok: true, data: categories.map(c => [c]), truncated: false };
+      }
+      return { ok: true, data: values, truncated: false };
+    }
   };
 }
 

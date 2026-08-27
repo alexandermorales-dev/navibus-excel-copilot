@@ -163,6 +163,24 @@ const Recipes = {
       }
     }
 
+    // Abort before creating an empty dashboard. If we have no KPIs, no
+    // breakdown table, and no charts, there is nothing to render —
+    // creating a sheet with just a title banner is worse than failing.
+    if (kpis.length === 0 && !breakdown && (!op.charts || op.charts.length === 0)) {
+      const reasons = [];
+      if (op.kpis && op.kpis.length > 0 && kpis.length === 0) {
+        reasons.push(`none of the KPI columns (${op.kpis.map(k => k.column).join(', ')}) were found on "${src.sheet}"`);
+      }
+      if (op.groupBy && op.valueColumn && !breakdown) {
+        reasons.push(`could not aggregate "${op.valueColumn}" by "${op.groupBy}" — the column may not exist or the data may not be in a clean tabular format`);
+      }
+      const detail = reasons.length > 0 ? reasons.join('; ') : 'no KPIs, breakdown, or charts could be built from the source data';
+      return {
+        ok: false,
+        error: `Cannot build dashboard from "${src.sheet}": ${detail}. The source sheet may have a non-tabular layout (merged cells, multi-block columns, or interleaved header rows). Try normalizing the data into a flat table first.`
+      };
+    }
+
     ops.push({ op: 'add_sheet', name: sheet, tabColor: this.T.navy });
 
     const layout = this.planDashboardLayout({ kpis, breakdown, charts: op.charts || [] });
@@ -332,7 +350,36 @@ const Recipes = {
     }
 
     if (seen.size === 0) {
-      return { ok: false, error: `Column "${op.groupBy}" has no non-empty values to group by` };
+      return { ok: false, error: `Column "${op.groupBy}" has no non-empty values to group by on "${src.sheet}"` };
+    }
+
+    // Read the value column to verify it actually contains numbers.
+    // On non-tabular sheets (merged cells, interleaved headers), the
+    // "value" column is often all text or empty — SUMIF would silently
+    // return 0 for every category, producing a useless all-zero table.
+    if (String(op.agg || 'sum').toLowerCase() !== 'count') {
+      const valRead = await ctx.readRange(
+        src.sheet,
+        `${valueCol.letter}${src.firstData}:${valueCol.letter}${src.lastData}`
+      );
+      if (valRead.ok) {
+        let numericCount = 0;
+        let nonEmptyCount = 0;
+        for (const row of (valRead.data || [])) {
+          const v = Array.isArray(row) ? row[0] : row;
+          if (v === null || v === undefined || v === '') continue;
+          nonEmptyCount++;
+          if (typeof v === 'number' || (typeof v === 'string' && v && !isNaN(parseFloat(v)) && /^[\d,.$%\s-]+$/.test(v))) {
+            numericCount++;
+          }
+        }
+        if (nonEmptyCount > 0 && numericCount === 0) {
+          return {
+            ok: false,
+            error: `Column "${op.valueColumn}" on "${src.sheet}" contains no numeric values (all text or empty). The data may not be in a clean tabular format — try normalizing it into a flat table with headers in the first row.`
+          };
+        }
+      }
     }
 
     // Cap categories so a high-cardinality column (an id, a timestamp)

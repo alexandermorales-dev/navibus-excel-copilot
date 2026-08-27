@@ -149,7 +149,15 @@ recipe.summary_table — just the aggregated table, formatted, no charts
  "source":{"sheet":"Data","range":"A1:F500"},"groupBy":"Region",
  "valueColumn":"Amount","agg":"sum"}
 
-If the request does not fit a recipe, use the raw ops below.`;
+If the request does not fit a recipe, use the raw ops below.
+
+IMPORTANT: Recipes require a clean tabular source — headers in the first
+row, one record per row, no merged cells or interleaved header rows. If
+the source sheet has a non-tabular layout (data in blocks across
+multiple column groups, description rows between data, etc.), do NOT use
+a recipe. Instead, tell the user in "answer" that the data needs to be
+normalized into a flat table first, and offer to build a normalization
+sheet using raw ops.`;
   },
 
   /**
