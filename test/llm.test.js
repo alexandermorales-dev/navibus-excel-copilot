@@ -5,7 +5,12 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { loadCore } = require('./helper.js');
 
-const { LLM } = loadCore();
+const { LLM, VERSION } = loadCore();
+
+test('VERSION is defined and semver-shaped', () => {
+  assert.ok(typeof VERSION === 'string', 'VERSION should be a string');
+  assert.ok(/^\d+\.\d+\.\d+$/.test(VERSION), `VERSION "${VERSION}" should be x.y.z`);
+});
 
 test('extractJSON: plain object', () => {
   const r = LLM.extractJSON('{"a":1}');

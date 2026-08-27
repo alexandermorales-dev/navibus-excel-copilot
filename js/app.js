@@ -61,6 +61,10 @@ const App = {
       this.renderQuotaBar();
       this.updateSendButton();
       this.updateStopButton();
+      // Show version in header and console for support diagnostics.
+      const badge = document.getElementById('versionBadge');
+      if (badge && typeof VERSION !== 'undefined') badge.textContent = `v${VERSION}`;
+      console.log(`Excel AI Copilot v${typeof VERSION !== 'undefined' ? VERSION : '?'}`);
       // No key yet → open Settings so onboarding is the first thing seen.
       if (!Config.hasApiKey()) this.el.settingsPanel.classList.remove('hidden');
     };

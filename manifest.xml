@@ -4,7 +4,7 @@
            xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
            xsi:type="TaskPaneApp">
   <Id>7a3f9c2e-1b4d-4e8a-9f6c-3d2e1a0b5c7f</Id>
-  <Version>1.0.0.0</Version>
+  <Version>2.1.0.0</Version>
   <ProviderName>Excel Copilot</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Excel AI Copilot" />

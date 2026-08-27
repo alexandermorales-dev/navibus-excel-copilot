@@ -13,6 +13,13 @@
    key, so nobody shares (or can drain) anyone else's free-tier quota.
    ============================================ */
 
+/**
+ * App version — single source of truth. Shown subtly in the UI header
+ * and logged to the console on boot so support can identify which build
+ * a user is running. Bump this when releasing changes.
+ */
+const VERSION = '2.1.0';
+
 const Store = {
   _memory: {},
 

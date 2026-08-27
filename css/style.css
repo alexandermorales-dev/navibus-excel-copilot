@@ -83,6 +83,16 @@ body {
   font-weight: 700;
 }
 
+.version-badge {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  opacity: 0.6;
+  margin-left: 2px;
+  user-select: none;
+  cursor: default;
+}
+
 .icon-btn {
   background: none;
   border: none;
