@@ -334,7 +334,9 @@ row). Prefer that sheet as the source for recipes.`;
 {"op":"delete_sheet","name":"S","userRequested":true}
 
 Ops run in order. Create a sheet before writing to it. Never autofit a
-dashboard sheet — recipes set deliberate column widths.
+dashboard sheet — recipes set deliberate column widths. When setting
+columnWidth manually, use at least 90 for label columns and 70 for value
+columns — narrower widths hide currency values.
 
 ## CRITICAL RULES FOR RAW OPS
 - NEVER reference a specific cell on another sheet (e.g. =Data!D20) unless

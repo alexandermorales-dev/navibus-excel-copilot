@@ -255,7 +255,13 @@ const Tools = {
         const r = s.getRange(fullRange);
         if (hasFormulas) r.formulas = formulaMatrix;
         else r.values = normalized;
-        if (numberFormat) r.numberFormat = numberFormat;
+        if (numberFormat) {
+          let nf = String(numberFormat).replace(/"/g, '""');
+          if (/\$/.test(nf) && !/\[\$-409\]/.test(nf)) {
+            nf = nf.replace(/\$/g, '[$-409]$');
+          }
+          r.numberFormat = nf;
+        }
         // Read back a sample to surface formula errors.
         r.load('values, rowCount, columnCount');
         await ctx.sync();
@@ -305,12 +311,16 @@ const Tools = {
       }
       if (action.wrapText !== undefined) ops.push(() => { ctx_fmt.wrapText = !!action.wrapText; });
       if (action.numberFormat !== undefined && typeof action.numberFormat === 'string') {
-        // Sanitize number format: escape quotes, remove invalid chars.
-        const nf = action.numberFormat.replace(/"/g, '""');
+        // Sanitize number format: escape quotes, and auto-lock currency to
+        // USD locale so $ always renders as US dollar sign (not Bs.S etc).
+        let nf = action.numberFormat.replace(/"/g, '""');
+        if (/\$/.test(nf) && !/\[\$-409\]/.test(nf)) {
+          nf = nf.replace(/\$/g, '[$-409]$');
+        }
         ops.push(() => { ctx_range.numberFormat = nf; });
       }
       if (action.columnWidth !== undefined && typeof action.columnWidth === 'number' && action.columnWidth > 0)
-        ops.push(() => { ctx_fmt.columnWidth = action.columnWidth; });
+        ops.push(() => { ctx_fmt.columnWidth = Math.max(action.columnWidth, 60); });
       if (action.rowHeight !== undefined && typeof action.rowHeight === 'number' && action.rowHeight > 0)
         ops.push(() => { ctx_fmt.rowHeight = action.rowHeight; });
       if (action.merge) ops.push(() => { ctx_range.merge(true); });
