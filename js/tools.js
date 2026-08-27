@@ -271,7 +271,6 @@ const Tools = {
     },
 
     async format_range(action) {
-      console.log('format_range input:', JSON.stringify({ sheet: action.sheet, range: action.range, numberFormat: action.numberFormat, bold: action.bold, fillColor: action.fillColor, fontColor: action.fontColor, fontSize: action.fontSize, merge: action.merge, borders: action.borders, columnWidth: action.columnWidth, rowHeight: action.rowHeight }));
       await Journal.recordRangePreImage(action.sheet, action.range);
 
       // Validate and sanitize all arguments BEFORE queuing them, since
@@ -413,26 +412,39 @@ const Tools = {
     },
 
     async create_pivot({ destSheet, dest, source, name, rows, cols, values, filters }) {
-      await Excel.run(async (ctx) => {
-        const ds = ctx.workbook.worksheets.getItem(destSheet);
-        const pivot = ctx.workbook.pivotTables.add(name, source, ds.getRange(dest));
-        if (Array.isArray(rows)) for (const f of rows) pivot.rowFields.add(f);
-        if (Array.isArray(cols)) for (const f of cols) pivot.columnFields.add(f);
-        if (Array.isArray(values)) {
-          for (const v of values) {
-            const vf = pivot.dataFields.add(v.col);
-            if (v.agg) vf.summarizeBy = Tools.mapAggregation(v.agg);
+      try {
+        await Excel.run(async (ctx) => {
+          const ds = ctx.workbook.worksheets.getItem(destSheet);
+          // Source must be a full range reference including sheet name.
+          // If the model passed just a sheet name, expand to its used range.
+          let sourceRef = source;
+          if (source && !source.includes('!')) {
+            const srcSheet = ctx.workbook.worksheets.getItem(source);
+            const usedRange = srcSheet.getUsedRange();
+            usedRange.load('address');
+            await ctx.sync();
+            sourceRef = usedRange.address;
           }
-        }
-        if (Array.isArray(filters)) for (const f of filters) pivot.filterFields.add(f);
-        await ctx.sync();
-      });
-      Journal.recordCreatedObject('pivot', name, destSheet);
-      return { ok: true, result: { name, destSheet, dest } };
+          const pivot = ctx.workbook.pivotTables.add(name, sourceRef, ds.getRange(dest));
+          if (Array.isArray(rows)) for (const f of rows) pivot.rowFields.add(f);
+          if (Array.isArray(cols)) for (const f of cols) pivot.columnFields.add(f);
+          if (Array.isArray(values)) {
+            for (const v of values) {
+              const vf = pivot.dataFields.add(v.col);
+              if (v.agg) vf.summarizeBy = Tools.mapAggregation(v.agg);
+            }
+          }
+          if (Array.isArray(filters)) for (const f of filters) pivot.filterFields.add(f);
+          await ctx.sync();
+        });
+        Journal.recordCreatedObject('pivot', name, destSheet);
+        return { ok: true, result: { name, destSheet, dest } };
+      } catch (e) {
+        return { ok: false, error: `create_pivot: ${e.message || String(e)}` };
+      }
     },
 
     async create_chart(action) {
-      console.log('create_chart input:', JSON.stringify({ sheet: action.sheet, type: action.type, sourceRange: action.sourceRange, dest: action.dest, title: action.title, seriesBy: action.seriesBy }));
       const chartInfo = await Excel.run(async (ctx) => {
         const s = ctx.workbook.worksheets.getItem(action.sheet);
         let chart;
@@ -640,24 +652,41 @@ const Tools = {
   },
 
   applyBorders(ctx, range, borders) {
+    const validEdges = ['EdgeTop', 'EdgeBottom', 'EdgeLeft', 'EdgeRight',
+                        'InsideHorizontal', 'InsideVertical', 'DiagonalUp', 'DiagonalDown'];
     if (typeof borders === 'string') {
       // Apply same style to all edges.
       const lineStyle = this.borderLineStyle(borders);
-      range.format.borders.getItem('EdgeTop').style = lineStyle;
-      range.format.borders.getItem('EdgeBottom').style = lineStyle;
-      range.format.borders.getItem('EdgeLeft').style = lineStyle;
-      range.format.borders.getItem('EdgeRight').style = lineStyle;
+      if (!lineStyle) return;
+      for (const edge of ['EdgeTop', 'EdgeBottom', 'EdgeLeft', 'EdgeRight']) {
+        try { range.format.borders.getItem(edge).style = lineStyle; }
+        catch (e) { /* skip unsupported edge */ }
+      }
     } else if (borders && typeof borders === 'object') {
       for (const key of Object.keys(borders)) {
-        try {
-          range.format.borders.getItem(key).style = this.borderLineStyle(borders[key]);
-        } catch (e) { /* ignore invalid edge key */ }
+        if (!validEdges.includes(key)) continue;
+        const lineStyle = this.borderLineStyle(borders[key]);
+        if (!lineStyle) continue;
+        try { range.format.borders.getItem(key).style = lineStyle; }
+        catch (e) { /* skip unsupported edge */ }
       }
     }
   },
 
   borderLineStyle(s) {
-    const map = { Thin: 'Thin', Medium: 'Medium', Thick: 'Thick', Dashed: 'Dash' };
+    // Office.js requires the Excel.BorderLineStyle enum, not a string.
+    // Fall back gracefully if the enum is not loaded yet.
+    const BLS = (typeof Excel !== 'undefined' && Excel.BorderLineStyle) ? Excel.BorderLineStyle : null;
+    if (BLS) {
+      const map = {
+        Thin: BLS.thin, Medium: BLS.medium, Thick: BLS.thick,
+        Dashed: BLS.dash, Dotted: BLS.dotted, Double: BLS.double,
+        Dash: BLS.dash, Dot: BLS.dotted
+      };
+      return map[s] || BLS.thin;
+    }
+    // Fallback: string enum values (works in some Office.js versions)
+    const map = { Thin: 'Thin', Medium: 'Medium', Thick: 'Thick', Dashed: 'Dash', Dotted: 'Dotted', Double: 'Double', Dash: 'Dash', Dot: 'Dotted' };
     return map[s] || 'Thin';
   },
 
