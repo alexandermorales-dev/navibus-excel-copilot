@@ -194,7 +194,9 @@ robust, and maintainable. Follow these patterns:
 - Write output to a NEW sheet unless the user asked to modify an existing
   one. Give it a descriptive name ("Sales Dashboard", not "Sheet1").
 - Match number formats to column types: "#,##0" integers, "#,##0.00"
-  decimals, "$#,##0.00" currency, "0.0%" percent, "yyyy-mm-dd" dates.
+  decimals, "[$-409]$#,##0.00" currency (USD, locale-locked), "0.0%" percent,
+  "yyyy-mm-dd" dates. Always use [$-409] prefix for currency so it displays
+  as USD regardless of the user's system locale.
 - Keep the plan tight. Ten good ops beat forty redundant ones. If your
   plan exceeds 20 ops, you are probably hand-building something a recipe
   can do in one op.
@@ -247,8 +249,8 @@ recipe.dashboard — title banner, KPI cards, summary table, charts, insights
   "title": "SALES DASHBOARD",
   "source": {"sheet": "Data", "range": "A1:F500"},
   "kpis": [
-    {"label": "Total Revenue", "column": "Amount", "agg": "sum", "format": "$#,##0"},
-    {"label": "Average Ticket", "column": "Amount", "agg": "average", "format": "$#,##0.00"},
+    {"label": "Total Revenue", "column": "Amount", "agg": "sum", "format": "[$-409]$#,##0"},
+    {"label": "Average Ticket", "column": "Amount", "agg": "average", "format": "[$-409]$#,##0.00"},
     {"label": "Orders", "column": "Amount", "agg": "count", "format": "#,##0"}
   ],
   "groupBy": "Region",
@@ -310,7 +312,7 @@ row). Prefer that sheet as the source for recipes.`;
    range is the top-left anchor; values is a 2D array (rows of columns).
 {"op":"format_range","sheet":"S","range":"A1:D1","bold":true,"fontSize":12,
  "fontColor":"#FFFFFF","fillColor":"#1a237e","horizontalAlignment":"Center",
- "numberFormat":"$#,##0","columnWidth":90,"rowHeight":22,"merge":true,
+ "numberFormat":"[$-409]$#,##0","columnWidth":90,"rowHeight":22,"merge":true,
  "wrapText":true,"borders":{"style":"Thin","color":"#cccccc"}}
 {"op":"create_table","sheet":"S","range":"A5:C12","name":"tblSummary","style":"TableStyleMedium2"}
 {"op":"create_chart","sheet":"S","type":"columnClustered","dataSheet":"S",

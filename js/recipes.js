@@ -576,7 +576,7 @@ const Recipes = {
     if (fn === 'COUNT') return '#,##0';
     const type = desc && desc.columnTypes ? desc.columnTypes[colIdx] : null;
     switch (type) {
-      case 'currency': return '$#,##0.00';
+      case 'currency': return '[$-409]$#,##0.00';
       case 'percent':  return '0.0%';
       case 'date':     return 'yyyy-mm-dd';
       case 'number':   return fn === 'AVERAGE' || fn === 'average' ? '#,##0.00' : '#,##0';

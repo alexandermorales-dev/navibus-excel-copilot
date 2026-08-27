@@ -75,7 +75,7 @@ test('isCircular: pie and doughnut have no axes', () => {
 test('formatFor: derives the number format from the column type', () => {
   const { Recipes } = setup();
   const desc = snapshot().sheets[0];
-  assert.strictEqual(Recipes.formatFor(desc, 4, 'SUM'), '$#,##0.00');   // currency
+  assert.strictEqual(Recipes.formatFor(desc, 4, 'SUM'), '[$-409]$#,##0.00');   // currency
   assert.strictEqual(Recipes.formatFor(desc, 5, 'SUM'), '0.0%');        // percent
   assert.strictEqual(Recipes.formatFor(desc, 3, 'SUM'), '#,##0');       // number
   assert.strictEqual(Recipes.formatFor(desc, 4, 'COUNT'), '#,##0');     // counts are integers
@@ -222,7 +222,7 @@ test('summary block: chart source excludes the total row and includes the header
 
 test('summary block: number format follows the value column type', async () => {
   const { built } = await summaryOps();
-  assert.strictEqual(built.numberFormat, '$#,##0.00'); // Importe is currency
+  assert.strictEqual(built.numberFormat, '[$-409]$#,##0.00'); // Importe is currency
 });
 
 /* ---------- full dashboard layout ---------- */
