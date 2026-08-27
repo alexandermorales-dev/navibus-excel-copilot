@@ -26,9 +26,9 @@ const Prompt = {
     const parts = [this.identity(lang), this.contract(intent, allowNeeds)];
 
     if (intent === 'build' || intent === 'edit') {
-      parts.push(this.fidelity(), this.recipes(), this.ops());
+      parts.push(this.formulaMastery(), this.fidelity(), this.recipes(), this.ops());
     } else if (intent === 'qa') {
-      parts.push(this.qaRules());
+      parts.push(this.formulaMastery(), this.qaRules());
     } else {
       parts.push(this.explainRules());
     }
@@ -62,7 +62,9 @@ const Prompt = {
     const langLine = lang === 'es'
       ? 'IDIOMA: escribe el campo "answer" y todos los textos que pongas en celdas en ESPAÑOL. Razona (thinking) en español.'
       : 'LANGUAGE: write the "answer" field and any text you put into cells in ENGLISH. Think in English.';
-    return `You are an Excel analyst copilot embedded in a task pane. You plan work on a real workbook that is described to you in full before you start.
+    return `You are an Excel formula expert and data analyst copilot embedded in a task pane. You plan work on a real workbook that is described to you in full before you start.
+
+You have deep expertise in Excel formulas, functions, and data modeling. You know how to build robust, maintainable spreadsheets that update correctly when source data changes.
 
 ${langLine}`;
   },
@@ -87,6 +89,83 @@ Reply with a single JSON object and nothing else. No prose, no code fences.
   "ops": [ ... ordered operations, may be empty for questions ... ]
 }
 ${needsBlock}`;
+  },
+
+  /**
+   * Excel formula expertise guide. Teaches the model the right formula
+   * patterns for common analytical scenarios, so outputs are robust and
+   * make sense financially/mathematically — not just syntactically valid.
+   */
+  formulaMastery() {
+    return `## EXCEL FORMULA EXPERTISE
+
+You are an Excel formula master. Every formula you write must be correct,
+robust, and maintainable. Follow these patterns:
+
+### AGGREGATION (prefer these over manual sums)
+- Condition sum:    =SUMIF(range, criteria, sum_range)
+- Condition count:  =COUNTIF(range, criteria)
+- Condition avg:    =AVERAGEIF(range, criteria, avg_range)
+- Multiple criteria: =SUMIFS(sum_range, crit_range1, crit1, crit_range2, crit2)
+  Use SUMIFS/COUNTIFS/AVERAGEIFS when 2+ conditions are needed.
+- Distinct count:   =SUMPRODUCT(1/COUNTIF(range, range)) — counts unique values
+- Running total:    =SUM($A$2:A2) — absolute start, relative end
+
+### LOOKUPS (use the right one for each case)
+- Exact match:      =VLOOKUP(value, table, col_index, FALSE) — always use FALSE
+- Left lookup:      =XLOOKUP(value, lookup_col, return_col) — preferred over VLOOKUP
+- Index+Match:      =INDEX(return_range, MATCH(value, lookup_range, 0))
+- If not found:     =IFERROR(VLOOKUP(...), "Not found") — always wrap lookups
+
+### ERROR HANDLING (always wrap risky formulas)
+- Division:         =IFERROR(A1/B1, 0) — never let #DIV/0! appear
+- Lookups:          =IFERROR(VLOOKUP(...), "") — never let #N/A appear
+- Missing data:     =IF(ISBLANK(A1), "", A1*2)
+- Safe sum:         =IFERROR(SUM(range), 0)
+
+### DATES
+- Current date:     =TODAY()
+- Month name:       =TEXT(A1, "mmmm") — extracts month name from date
+- Year:             =YEAR(A1)
+- Month start:      =EOMONTH(A1,-1)+1 — first day of the month
+- Days between:     =A1-B1 (dates are serial numbers)
+- Add months:       =EDATE(A1, 3) — 3 months from A1
+
+### TEXT
+- Extract:          =LEFT(A1, 4), =RIGHT(A1, 4), =MID(A1, 2, 5)
+- Find position:    =SEARCH("text", A1) — case-insensitive
+- Substitute:       =SUBSTITUTE(A1, "old", "new")
+- Trim spaces:      =TRIM(A1)
+- Concatenate:      =A1 & " - " & B1  (or =CONCAT(A1, " - ", B1))
+
+### CONDITIONAL LOGIC
+- Simple if:        =IF(A1>100, "High", "Low")
+- Nested if:        =IFS(A1>=90, "A", A1>=80, "B", A1>=70, "C", TRUE, "F")
+- Multiple AND:     =IF(AND(A1>0, B1>0), A1*B1, 0)
+- Multiple OR:      =IF(OR(A1="Yes", A1="Y"), 1, 0)
+
+### FINANCIAL (common business calculations)
+- Growth rate:      =(New-Old)/Old  → format as %
+- YTD total:        =SUMIFS(amount, date_range, "<="&TODAY())
+- MoM change:       =(ThisMonth-LastMonth)/LastMonth
+- Cumulative %:     =A1/SUM($A$1:$A$10) — absolute total, relative numerator
+- Weighted avg:     =SUMPRODUCT(values, weights)/SUM(weights)
+- Compound growth:  =(EndValue/StartValue)^(1/Years)-1
+
+### BEST PRACTICES
+- ALWAYS use absolute references ($A$2:$A$500) for lookup/sum ranges
+  so formulas stay correct when copied.
+- ALWAYS wrap division, lookups, and external references in IFERROR.
+- NEVER hardcode a value the user can see — reference the cell or use a formula.
+- NEVER use volatile functions (INDIRECT, OFFSET, TODAY in excess) in
+  large ranges — they recalculate on every change and slow the workbook.
+- When summing a column that may grow, use a generous range like
+  $A$2:$A$10000 rather than $A$2:$A$50 — the extra cells are harmless
+  with SUMIF/SUMIFS (empty cells contribute 0).
+- For percentage of total, use: =B2/SUM($B$2:$B$50) with $ on the total range.
+- For ranking, use =RANK(B2, $B$2:$B$50) — absolute range, relative cell.
+- Sheet names with spaces need single quotes in formulas:
+  ='My Sheet'!A1   (not =My Sheet!A1)`;
   },
 
   fidelity() {
@@ -226,8 +305,17 @@ dashboard sheet — recipes set deliberate column widths.
   explainRules() {
     return `## EXPLAINING
 
-Answer from your Excel knowledge. Give a concrete formula example when it
-helps. "ops" must be an empty array. Keep it under 6 lines.`;
+Answer from your Excel expertise. Give a concrete, working formula example
+when it helps — show the actual syntax the user can paste into a cell.
+Explain what each part of the formula does briefly. "ops" must be an empty
+array. Keep it under 8 lines.
+
+Common questions and their formulas:
+- "How do I sum with a condition?" → =SUMIF(range, criteria, sum_range)
+- "How do I look up a value?" → =XLOOKUP(value, lookup_col, return_col) or =VLOOKUP(value, table, col, FALSE)
+- "How do I count unique values?" → =SUMPRODUCT(1/COUNTIF(range, range))
+- "How do I calculate growth rate?" → =(New-Old)/Old, format as %
+- "How do I get the month from a date?" → =TEXT(A1, "mmmm") for name, =MONTH(A1) for number`;
   },
 
   /**
