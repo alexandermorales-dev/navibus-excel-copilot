@@ -182,19 +182,49 @@ const Providers = {
   },
 
   /**
+   * Models known to be deprecated/removed. These are filtered out of
+   * discovered lists so stale localStorage caches don't resurrect them.
+   * Updated when Google sunsets a model (404 on first call).
+   */
+  DEPRECATED: [
+    /^gemini-2\.[05]-/i,       // gemini-2.5-flash, gemini-2.0-flash (deprecated Jul 2026)
+    /^gemini-1\.[05]-/i,       // gemini-1.5-* (older)
+  ],
+
+  isDeprecated(model) {
+    return this.DEPRECATED.some(re => re.test(model));
+  },
+
+  /**
    * Resolve the model id to use for a provider/role.
    * Prefers discovered models matched against the provider's preference
    * patterns; falls back to the static list when discovery hasn't run.
+   * Deprecated models are filtered out of discovered lists.
    */
   resolveModel(id, role) {
     const p = this.get(id);
     if (!p) return null;
 
-    // Explicit user override wins.
+    // Explicit user override wins — but clear it if the model is deprecated.
     const override = Config.modelOverride(id);
-    if (override) return override;
+    if (override) {
+      if (this.isDeprecated(override)) {
+        console.warn(`Providers: overriding deprecated model ${override}, clearing override`);
+        Config.setModelOverride(id, '');
+      } else {
+        return override;
+      }
+    }
 
-    const available = this.discovered[id] || Config.loadDiscovered(id) || [];
+    const raw = this.discovered[id] || Config.loadDiscovered(id) || [];
+    // Filter out deprecated models from stale cached lists.
+    const available = raw.filter(m => !this.isDeprecated(m));
+    if (available.length !== raw.length) {
+      // Update the cache so we don't re-filter every call.
+      this.discovered[id] = available;
+      Config.saveDiscovered(id, available);
+    }
+
     const patterns = p.models[role] || p.models.plan || [];
 
     for (const re of patterns) {

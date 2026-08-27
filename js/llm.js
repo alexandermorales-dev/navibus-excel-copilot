@@ -109,9 +109,10 @@ const LLM = {
       // Before switching to a different provider, try alternate models
       // within the same provider. A 429 on gemini-3.6-flash may not affect
       // gemini-3.1-flash-lite (separate rate limits per model family).
-      // Only do this for rate-limit (429) and server errors — not for
-      // auth failures (bad key affects all models) or content rejections.
-      if ((result.errorType === 'rate_limit' || result.errorType === 'server') &&
+      // A 404 means the model is deprecated/removed — trying another model
+      // is the correct response. Only skip for auth failures (bad key
+      // affects all models) or content rejections.
+      if ((result.errorType === 'rate_limit' || result.errorType === 'server' || result.errorType === 'not_found') &&
           !tried.includes(`${route.providerId}:alt`)) {
         const alts = Providers.altModels(route.providerId, role, route.model);
         for (const altModel of alts) {
@@ -255,6 +256,7 @@ const LLM = {
     if (status === 429) return 'rate_limit';
     if (status === 402) return 'quota';
     if (status === 401 || status === 403) return 'auth';
+    if (status === 404) return 'not_found';
     if (status >= 500) return 'server';
     return 'client';
   },

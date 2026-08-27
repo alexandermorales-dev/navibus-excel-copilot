@@ -214,6 +214,27 @@ test('altModels: caps at 2 alternates', () => {
   assert.ok(alts.length <= 2);
 });
 
+test('resolveModel: filters deprecated models from discovered list', () => {
+  const { Providers } = setup();
+  // Simulate a stale cache that still includes gemini-2.5-flash.
+  Providers.discovered.gemini = [
+    'gemini-2.5-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'
+  ];
+  const model = Providers.resolveModel('gemini', 'plan');
+  // Should NOT return the deprecated gemini-2.5-flash.
+  assert.ok(!/gemini-2\.5/.test(model), `expected non-deprecated model, got ${model}`);
+  assert.ok(/gemini-3/.test(model), `expected gemini-3.x, got ${model}`);
+});
+
+test('resolveModel: clears deprecated user override', () => {
+  const { Providers, Config } = setup();
+  Config.setModelOverride('gemini', 'gemini-2.5-flash');
+  const model = Providers.resolveModel('gemini', 'plan');
+  assert.ok(!/gemini-2\.5/.test(model), `expected non-deprecated model, got ${model}`);
+  // Override should have been cleared.
+  assert.strictEqual(Config.modelOverride('gemini'), '');
+});
+
 test('record: counts requests and tokens', () => {
   const { Quota } = setup();
   Quota.record('gemini', { tokens: 500 });
