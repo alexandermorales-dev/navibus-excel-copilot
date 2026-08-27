@@ -321,7 +321,14 @@ const App = {
 
       if (!result.ok) {
         this.updateRunStatus(activityEl, 'error');
-        this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
+        // If the model returned readable text (just not valid JSON), show
+        // it as a regular message instead of an error with retry button.
+        if (result.showAsMessage) {
+          this.addMessage('assistant', result.error);
+          this.conversation.push({ role: 'assistant', content: result.error });
+        } else {
+          this.addErrorMessageWithRetry(`${I18n.t('aiError')}: ${result.error}`);
+        }
       } else {
         this.updateRunStatus(activityEl, result.aborted ? 'stopped' : 'done',
                              I18n.tf('callsUsed', result.calls));

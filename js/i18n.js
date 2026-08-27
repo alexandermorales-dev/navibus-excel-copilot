@@ -193,12 +193,16 @@ const I18n = {
       en: 'The model returned an empty response. Retrying automatically...'
     },
     retryNudge1: {
-      es: 'Tu respuesta anterior estaba vacía o no era JSON válido. Devuelve SOLO un objeto JSON con los campos "answer" y "ops". No incluyas texto adicional.',
-      en: 'Your previous response was empty or not valid JSON. Return ONLY a JSON object with "answer" and "ops" fields. No additional text.'
+      es: 'Tu respuesta anterior estaba vacía o no era JSON válido. Devuelve SOLO un objeto JSON con los campos "answer" y "ops". No incluyas texto adicional fuera del JSON. Si no puedes cumplir la solicitud, explica por qué en "answer" y deja "ops" vacío.',
+      en: 'Your previous response was empty or not valid JSON. Return ONLY a JSON object with "answer" and "ops" fields. No text outside the JSON. If you cannot fulfill the request, explain why in "answer" and leave "ops" empty.'
     },
     retryNudge2: {
-      es: 'Último intento. Devuelve un objeto JSON válido: {"intent":"...","answer":"texto breve","ops":[...]}. El campo "answer" debe contener un mensaje real para el usuario, no el esquema.',
-      en: 'Final attempt. Return a valid JSON object: {"intent":"...","answer":"short message","ops":[...]}. The "answer" field must contain a real message for the user, not the schema.'
+      es: 'Intento 2. Devuelve un objeto JSON válido: {"intent":"...","answer":"texto breve","ops":[...]}. El campo "answer" debe contener un mensaje real para el usuario. No repitas el esquema.',
+      en: 'Attempt 2. Return a valid JSON object: {"intent":"...","answer":"short message","ops":[...]}. The "answer" field must contain a real message for the user. Do not repeat the schema.'
+    },
+    retryNudge3: {
+      es: 'Último intento. Responde con un JSON mínimo: {"answer":"explica brevemente qué pasó","ops":[]}. Si no puedes hacer lo que pide el usuario, dilo en "answer".',
+      en: 'Final attempt. Reply with minimal JSON: {"answer":"briefly explain what happened","ops":[]}. If you cannot do what the user asked, say so in "answer".'
     }
   },
 

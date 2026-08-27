@@ -28,7 +28,7 @@ const Agent = {
   PLAN_MAX_TOKENS: 6000,
   REPAIR_MAX_TOKENS: 3000,
   ANSWER_MAX_TOKENS: 800,
-  MAX_PLAN_RETRIES: 2,       // total attempts = 1 + MAX_PLAN_RETRIES
+  MAX_PLAN_RETRIES: 3,       // total attempts = 1 + MAX_PLAN_RETRIES
   RETRY_DELAY_MS: 500,
 
   /**
@@ -88,7 +88,7 @@ const Agent = {
         userText, snap, intent, lang, conversation, signal,
         onThinking, onProvider, stats
       });
-      if (!planned.ok) return this._fail(planned.error, stats, planned.errorType);
+      if (!planned.ok) return this._fail(planned.error, stats, planned.errorType, planned.showAsMessage);
       if (signal && signal.aborted) return this._aborted(stats);
 
       let plan = planned.plan;
@@ -207,6 +207,7 @@ const Agent = {
     const RETRYABLE = new Set(['plan', 'empty']);
     let lastError = I18n.t('badPlan');
     let lastErrorType = 'plan';
+    let lastText = '';   // last non-JSON text from the model, for error display
 
     for (let attempt = 0; attempt <= this.MAX_PLAN_RETRIES; attempt++) {
       if (signal && signal.aborted) return { ok: false, error: I18n.t('aborted'), errorType: 'aborted' };
@@ -214,10 +215,8 @@ const Agent = {
       const messages = attempt === 0
         ? baseMessages
         : [...baseMessages, {
-            role: 'assistant',
-            content: attempt === 1
-              ? I18n.t('retryNudge1')
-              : I18n.t('retryNudge2')
+            role: 'user',
+            content: [I18n.t('retryNudge1'), I18n.t('retryNudge2'), I18n.t('retryNudge3')][attempt - 1] || I18n.t('retryNudge3')
           }];
 
       const res = await LLM.chat({
@@ -249,9 +248,17 @@ const Agent = {
 
       const parsed = LLM.extractJSON(res.text);
       if (!parsed.ok) {
-        console.warn(`Agent: unparseable plan (attempt ${attempt + 1}):`, String(res.text || '').slice(0, 400));
-        lastError = I18n.t('badPlan');
-        lastErrorType = 'plan';
+        const textPreview = String(res.text || '').trim().slice(0, 300);
+        lastText = String(res.text || '');
+        if (!textPreview) {
+          console.warn(`Agent: empty response (attempt ${attempt + 1}) — model returned only thinking, no answer`);
+          lastError = I18n.t('emptyResponse');
+          lastErrorType = 'empty';
+        } else {
+          console.warn(`Agent: unparseable plan (attempt ${attempt + 1}):`, textPreview);
+          lastError = I18n.t('badPlan');
+          lastErrorType = 'plan';
+        }
         if (attempt < this.MAX_PLAN_RETRIES) await this._delay(this.RETRY_DELAY_MS, signal);
         continue;
       }
@@ -272,6 +279,17 @@ const Agent = {
       return { ok: true, plan: parsed.value };
     }
 
+    // All retries exhausted. If the model returned readable text (just not
+    // JSON), show it to the user instead of a generic "bad plan" error —
+    // the model may have explained why it couldn't comply.
+    if (lastText && lastText.trim().length > 10 && lastErrorType === 'plan') {
+      return {
+        ok: false,
+        error: lastText.trim().slice(0, 500),
+        errorType: 'plan',
+        showAsMessage: true
+      };
+    }
     return { ok: false, error: lastError, errorType: lastErrorType };
   },
 
@@ -499,12 +517,13 @@ const Agent = {
     };
   },
 
-  _fail(error, stats, errorType) {
+  _fail(error, stats, errorType, showAsMessage) {
     const sealed = Journal.sealRequest();
     return {
       ok: false,
       error,
       errorType: errorType || 'unknown',
+      showAsMessage: !!showAsMessage,
       calls: stats.calls,
       tokens: stats.tokens,
       sealed
