@@ -271,6 +271,7 @@ const Tools = {
     },
 
     async format_range(action) {
+      console.log('format_range input:', JSON.stringify({ sheet: action.sheet, range: action.range, numberFormat: action.numberFormat, bold: action.bold, fillColor: action.fillColor, fontColor: action.fontColor, fontSize: action.fontSize, merge: action.merge, borders: action.borders, columnWidth: action.columnWidth, rowHeight: action.rowHeight }));
       await Journal.recordRangePreImage(action.sheet, action.range);
 
       // Validate and sanitize all arguments BEFORE queuing them, since
@@ -431,6 +432,7 @@ const Tools = {
     },
 
     async create_chart(action) {
+      console.log('create_chart input:', JSON.stringify({ sheet: action.sheet, type: action.type, sourceRange: action.sourceRange, dest: action.dest, title: action.title, seriesBy: action.seriesBy }));
       const chartInfo = await Excel.run(async (ctx) => {
         const s = ctx.workbook.worksheets.getItem(action.sheet);
         let chart;
