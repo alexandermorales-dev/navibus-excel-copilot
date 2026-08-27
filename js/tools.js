@@ -272,34 +272,89 @@ const Tools = {
 
     async format_range(action) {
       await Journal.recordRangePreImage(action.sheet, action.range);
-      await Excel.run(async (ctx) => {
-        const s = ctx.workbook.worksheets.getItem(action.sheet);
-        const range = s.getRange(action.range);
-        const fmt = range.format;
 
-        const safeSet = (setter) => { try { setter(); } catch (e) { /* skip invalid arg */ } };
-        if (action.bold !== undefined) safeSet(() => fmt.font.bold = action.bold);
-        if (action.italic !== undefined) safeSet(() => fmt.font.italic = action.italic);
-        if (action.fontSize !== undefined && typeof action.fontSize === 'number') safeSet(() => fmt.font.size = action.fontSize);
-        if (action.fontName !== undefined && typeof action.fontName === 'string') safeSet(() => fmt.font.name = action.fontName);
-        if (action.fontColor !== undefined) {
-          const sc = Tools.sanitizeColor(action.fontColor);
-          if (sc) safeSet(() => fmt.font.color = sc);
+      // Validate and sanitize all arguments BEFORE queuing them, since
+      // Office.js validates at ctx.sync() — one bad property rejects the
+      // entire batch, taking down valid properties with it.
+      const ops = [];
+      if (action.bold !== undefined) ops.push(() => { ctx_fmt.font.bold = action.bold; });
+      if (action.italic !== undefined) ops.push(() => { ctx_fmt.font.italic = action.italic; });
+      if (action.fontSize !== undefined && typeof action.fontSize === 'number' && action.fontSize > 0)
+        ops.push(() => { ctx_fmt.font.size = action.fontSize; });
+      if (action.fontName !== undefined && typeof action.fontName === 'string')
+        ops.push(() => { ctx_fmt.font.name = action.fontName; });
+      if (action.fontColor !== undefined) {
+        const sc = Tools.sanitizeColor(action.fontColor);
+        if (sc) ops.push(() => { ctx_fmt.font.color = sc; });
+      }
+      if (action.fillColor !== undefined) {
+        const sc = Tools.sanitizeColor(action.fillColor);
+        if (sc) ops.push(() => { ctx_fmt.fill.color = sc; });
+      }
+      if (action.horizontalAlignment !== undefined) {
+        const valid = ['Left', 'Center', 'Right', 'Justify', 'Distributed'];
+        const val = String(action.horizontalAlignment);
+        const match = valid.find(v => v.toLowerCase() === val.toLowerCase());
+        if (match) ops.push(() => { ctx_fmt.horizontalAlignment = match; });
+      }
+      if (action.verticalAlignment !== undefined) {
+        const valid = ['Top', 'Center', 'Bottom', 'Justify', 'Distributed'];
+        const val = String(action.verticalAlignment);
+        const match = valid.find(v => v.toLowerCase() === val.toLowerCase());
+        if (match) ops.push(() => { ctx_fmt.verticalAlignment = match; });
+      }
+      if (action.wrapText !== undefined) ops.push(() => { ctx_fmt.wrapText = !!action.wrapText; });
+      if (action.numberFormat !== undefined && typeof action.numberFormat === 'string') {
+        // Sanitize number format: escape quotes, remove invalid chars.
+        const nf = action.numberFormat.replace(/"/g, '""');
+        ops.push(() => { ctx_range.numberFormat = nf; });
+      }
+      if (action.columnWidth !== undefined && typeof action.columnWidth === 'number' && action.columnWidth > 0)
+        ops.push(() => { ctx_fmt.columnWidth = action.columnWidth; });
+      if (action.rowHeight !== undefined && typeof action.rowHeight === 'number' && action.rowHeight > 0)
+        ops.push(() => { ctx_fmt.rowHeight = action.rowHeight; });
+      if (action.merge) ops.push(() => { ctx_range.merge(true); });
+      if (action.borders) ops.push(() => { Tools.applyBorders(ctx_ctx, ctx_range, action.borders); });
+
+      let ctx_ctx, ctx_range, ctx_fmt;
+      try {
+        await Excel.run(async (ctx) => {
+          ctx_ctx = ctx;
+          const s = ctx.workbook.worksheets.getItem(action.sheet);
+          ctx_range = s.getRange(action.range);
+          ctx_fmt = ctx_range.format;
+
+          // Apply all validated operations.
+          for (const op of ops) {
+            try { op(); } catch (e) { /* skip individual queue errors */ }
+          }
+          await ctx.sync();
+        });
+      } catch (e) {
+        // If the batch sync fails, retry with individual syncs so one
+        // bad property doesn't kill the rest. This is slower but
+        // resilient — exactly what we need for model-generated formats.
+        console.warn('format_range: batch sync failed, retrying individually:', e.message);
+        try {
+          await Excel.run(async (ctx) => {
+            const s = ctx.workbook.worksheets.getItem(action.sheet);
+            const range = s.getRange(action.range);
+            const fmt = range.format;
+            for (const op of ops) {
+              try {
+                // Rebind closures to this ctx.
+                ctx_ctx = ctx; ctx_range = range; ctx_fmt = fmt;
+                op();
+                await ctx.sync();
+              } catch (e2) {
+                console.warn('format_range: skipping invalid property:', e2.message);
+              }
+            }
+          });
+        } catch (e3) {
+          return { ok: false, error: e3.message || String(e3) };
         }
-        if (action.fillColor !== undefined) {
-          const sc = Tools.sanitizeColor(action.fillColor);
-          if (sc) safeSet(() => fmt.fill.color = sc);
-        }
-        if (action.horizontalAlignment !== undefined) safeSet(() => fmt.horizontalAlignment = action.horizontalAlignment);
-        if (action.verticalAlignment !== undefined) safeSet(() => fmt.verticalAlignment = action.verticalAlignment);
-        if (action.wrapText !== undefined) safeSet(() => fmt.wrapText = action.wrapText);
-        if (action.numberFormat !== undefined && typeof action.numberFormat === 'string') safeSet(() => range.numberFormat = action.numberFormat);
-        if (action.columnWidth !== undefined && typeof action.columnWidth === 'number' && action.columnWidth > 0) safeSet(() => fmt.columnWidth = action.columnWidth);
-        if (action.rowHeight !== undefined && typeof action.rowHeight === 'number' && action.rowHeight > 0) safeSet(() => fmt.rowHeight = action.rowHeight);
-        if (action.merge) safeSet(() => range.merge(true));
-        if (action.borders) safeSet(() => Tools.applyBorders(ctx, range, action.borders));
-        await ctx.sync();
-      });
+      }
       return { ok: true, result: { sheet: action.sheet, range: action.range } };
     },
 
