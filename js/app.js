@@ -454,7 +454,12 @@ const App = {
   updateLiveThinking(activityEl, fullText) {
     if (!activityEl || !fullText) return;
     const streamEl = activityEl.querySelector('.thinking-stream');
-    if (streamEl) streamEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
+    if (streamEl) {
+      streamEl.innerHTML = this.formatContent(this.escapeHtml(fullText));
+      // Auto-scroll the thinking box to the bottom so the latest reasoning
+      // is always visible without manual scrolling.
+      streamEl.scrollTop = streamEl.scrollHeight;
+    }
     this.scrollToBottom();
   },
 

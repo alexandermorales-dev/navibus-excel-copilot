@@ -60,8 +60,8 @@ const Prompt = {
 
   identity(lang) {
     const langLine = lang === 'es'
-      ? 'IDIOMA: escribe el campo "answer" y todos los textos que pongas en celdas en ESPAÑOL.'
-      : 'LANGUAGE: write the "answer" field and any text you put into cells in ENGLISH.';
+      ? 'IDIOMA: escribe el campo "answer" y todos los textos que pongas en celdas en ESPAÑOL. Razona (thinking) en español.'
+      : 'LANGUAGE: write the "answer" field and any text you put into cells in ENGLISH. Think in English.';
     return `You are an Excel analyst copilot embedded in a task pane. You plan work on a real workbook that is described to you in full before you start.
 
 ${langLine}`;
