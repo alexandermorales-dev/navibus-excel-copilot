@@ -123,12 +123,12 @@ test('penalize: 429 sets a cooldown honouring Retry-After', () => {
   assert.ok(av.waitMs > 25000 && av.waitMs <= 30000);
 });
 
-test('penalize: 429 without Retry-After uses at least 60s cooldown (RPM window)', () => {
+test('penalize: 429 without Retry-After uses at least 20s cooldown (RPM window)', () => {
   const { Quota } = setup();
   Quota.penalize('gemini', { status: 429 });
   const av = Quota.availability('gemini', 100);
   assert.strictEqual(av.reason, 'cooldown');
-  assert.ok(av.waitMs >= 55000, `expected >=55s cooldown, got ${av.waitMs}ms`);
+  assert.ok(av.waitMs >= 15000, `expected >=15s cooldown, got ${av.waitMs}ms`);
 });
 
 test('penalize: rapid 429s do NOT cause day exhaustion (RPM protection)', () => {
@@ -158,6 +158,30 @@ test('reward: clears the 429 streak so one bad minute is not fatal', () => {
   Quota.reward('gemini');
   Quota.penalize('gemini', { status: 429 });
   assert.notStrictEqual(Quota.availability('gemini', 100).reason, 'exhausted');
+});
+
+test('pick: prefers waiting for high-priority provider on short cooldown', () => {
+  const { Quota, Providers } = setup();
+  // Put Gemini (priority 1) in a short cooldown.
+  Quota.penalize('gemini', { status: 429 });
+  const av = Quota.availability('gemini', 100);
+  assert.strictEqual(av.reason, 'cooldown');
+  // pick() should prefer waiting for Gemini over OpenRouter (priority 3).
+  const route = Quota.pick('plan', 2000);
+  assert.ok(route, 'pick should return a route');
+  assert.strictEqual(route.providerId, 'gemini');
+  assert.ok(route.waitMs > 0, 'should have a wait time');
+  assert.ok(route.waitMs <= Quota.PREFER_WAIT_MS, 'wait should be within prefer threshold');
+});
+
+test('pick: fails over to lower-priority provider when cooldown is long', () => {
+  const { Quota, Providers } = setup();
+  // Put Gemini in a long cooldown (simulated by setting a far-future cooldown).
+  Quota._cooldownUntil.gemini = Date.now() + 120000;  // 2 minutes
+  // pick() should fail over to the next available provider.
+  const route = Quota.pick('plan', 2000);
+  assert.ok(route, 'pick should return a route');
+  assert.notStrictEqual(route.providerId, 'gemini');
 });
 
 test('record: counts requests and tokens', () => {

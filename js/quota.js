@@ -32,10 +32,16 @@ const Quota = {
   _streak: {},
 
   MAX_429_STREAK: 3,   // consecutive 429s before we treat the day as spent
-  // Minimum cooldown for a 429 without a Retry-After header. Must be at
-  // least as long as the longest RPM window (60s) so RPM throttling does
-  // not burn through the streak counter in rapid succession.
-  MIN_429_COOLDOWN_MS: 60000,
+  // Minimum cooldown for a 429 without a Retry-After header. Gemini's
+  // RPM window is 60s, but in practice the window slides — a 429 at
+  // second 0 may clear by second 30 if early requests age out. A 20s
+  // cooldown lets us retry sooner while still avoiding rapid-fire 429s.
+  MIN_429_COOLDOWN_MS: 20000,
+  // When the highest-priority provider is in a cooldown shorter than
+  // this, prefer waiting for it over failing over to a lower-priority
+  // provider. Keeps you on Gemini (1000 req/day) instead of burning
+  // OpenRouter (50 req/day) on a short wait.
+  PREFER_WAIT_MS: 25000,
 
   load() {
     const saved = Store.getJSON(this.STORAGE_KEY, null);
@@ -156,23 +162,52 @@ const Quota = {
    * right now, the one with the shortest wait is returned with waitMs so
    * the caller can sleep — but only after every alternative was ruled out.
    *
+   * PREFERENCE: if the highest-priority provider (e.g. Gemini) is in a
+   * short cooldown, we prefer waiting for it over immediately failing
+   * over to a lower-priority provider. This keeps you on the provider
+   * with the most daily quota instead of burning scarce OpenRouter
+   * requests (50/day) on what would have been a 20-second wait.
+   *
    * Returns { providerId, provider, model, waitMs } or null.
    */
   pick(role, estTokens = 2000) {
     const candidates = Providers.configured();
     if (candidates.length === 0) return null;
 
-    let best = null;
+    // First pass: find the immediately-available provider with the
+    // highest priority (lowest priority number), and track the best
+    // cooldown option for each provider.
+    let immediate = null;
+    let bestWait = null;
     for (const p of candidates) {
       const av = this.availability(p.id, estTokens);
       const model = Providers.resolveModel(p.id, role);
       if (!model) continue;
-      if (av.ok) return { providerId: p.id, provider: p, model, waitMs: 0 };
-      if (av.waitMs !== Infinity && (!best || av.waitMs < best.waitMs)) {
-        best = { providerId: p.id, provider: p, model, waitMs: av.waitMs };
+      if (av.ok) {
+        // Immediately available — keep the first (highest priority) one.
+        if (!immediate) immediate = { providerId: p.id, provider: p, model, waitMs: 0 };
+      } else if (av.waitMs !== Infinity && (!bestWait || av.waitMs < bestWait.waitMs)) {
+        bestWait = { providerId: p.id, provider: p, model, waitMs: av.waitMs };
       }
     }
-    return best;
+
+    // If a higher-priority provider is in a short cooldown, prefer
+    // waiting for it over taking a lower-priority immediately-available
+    // provider. This keeps you on Gemini (1000 req/day) instead of
+    // burning OpenRouter (50 req/day) on what would be a 20-second wait.
+    if (immediate && bestWait) {
+      const waitPriority = bestWait.provider.priority;
+      const immediatePriority = immediate.provider.priority;
+      if (waitPriority < immediatePriority && bestWait.waitMs <= this.PREFER_WAIT_MS) {
+        return bestWait;
+      }
+    }
+
+    // Prefer the immediate provider if we have one.
+    if (immediate) return immediate;
+
+    // Otherwise return whatever has the shortest wait.
+    return bestWait;
   },
 
   /**
