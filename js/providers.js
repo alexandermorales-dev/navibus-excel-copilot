@@ -53,18 +53,19 @@ const Providers = {
       modelFilter: (id) => !/\bpro\b/i.test(id) && !/tts|image|embed|aqa|guard|veo/i.test(id),
       models: {
         // Plan needs reasoning — prefer full flash over lite.
-        // First try current versions, then any flash (not lite), then lite.
+        // Order: specific versions → "latest" non-lite → any flash (not lite) → lite.
         plan:   [/^models\/gemini-3\.6-flash$/i, /^models\/gemini-3\.5-flash$/i,
                  /^gemini-3\.6-flash$/i, /^gemini-3\.5-flash$/i,
+                 /^gemini-flash-latest$/i,
                  /flash(?!-lite)/i, /flash-lite/i],
         // Answer/repair need speed, not deep reasoning — prefer lite.
         answer: [/flash-lite/i, /flash(?!-lite)/i],
         repair: [/flash-lite/i, /flash(?!-lite)/i]
       },
       fallbackModels: {
-        plan:   ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
-        answer: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash'],
-        repair: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash']
+        plan:   ['gemini-3.6-flash', 'gemini-flash-latest', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
+        answer: ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash'],
+        repair: ['gemini-3.5-flash-lite', 'gemini-flash-lite-latest', 'gemini-3.6-flash']
       }
     },
 

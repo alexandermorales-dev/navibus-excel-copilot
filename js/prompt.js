@@ -207,9 +207,10 @@ robust, and maintainable. Follow these patterns:
 - If the user's request is ambiguous (e.g. "analyze the data" without
   specifics), make reasonable choices in "answer" and plan ops that cover
   the most likely intent. Do not refuse — build something useful.
-- NEVER guess column letters on a sheet marked [LAYOUT: multiblock]. The
-  columns are not a flat table — guessing which column holds which value
-  will produce wrong formulas and #N/A errors. Instead:
+- NEVER reference individual cells from a sheet marked [LAYOUT: multiblock]
+  (e.g. =DC!F8, =DC!B7). The columns are not a flat table — you cannot know
+  which column holds which value, and referencing cells will produce #VALUE!
+  and #N/A errors. Instead:
   1. Look through the workbook description for another sheet with the same
      data in [LAYOUT: tabular] or [LAYOUT: titled] form — typically a
      transaction-level or detail sheet with one record per row.
@@ -217,6 +218,11 @@ robust, and maintainable. Follow these patterns:
   3. If no clean tabular sheet exists, tell the user in "answer" that the
      data needs normalizing first, and offer to build a normalization
      sheet using raw ops.
+- When the user asks to build something "based on" or "from" a sheet that
+  is [LAYOUT: multiblock], do NOT build from that sheet. Find the clean
+  tabular sheet with the same underlying data and build from that. The
+  multiblock sheet is a presentation layer — the data lives in the flat
+  tabular sheet.
 - When the user asks you to FIX a broken dashboard or table that you
   (or a previous run) created, do NOT hand-patch individual cells with
   guessed formulas. Instead, REBUILD it correctly:
