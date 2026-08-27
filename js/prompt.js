@@ -85,9 +85,15 @@ Reply with a single JSON object and nothing else. No prose, no code fences.
 
 {
   "intent": "${intent}",
-  "answer": "Message for the user. Markdown allowed: **bold** for key figures, bullet lists for steps, \`code\` for formulas. Do NOT invent numbers here; verified values are appended automatically. Explain WHAT you built and WHY, in 1-3 sentences. If there were limitations or assumptions, mention them briefly.",
+  "answer": "User-facing message. Markdown: **bold** for figures, bullets for steps, \`code\` for formulas. 1-3 sentences. Explain WHAT you built and WHY. Do NOT invent numbers — verified values are appended automatically.",
   "ops": [ ... ordered operations, may be empty for questions ... ]
 }
+
+CRITICAL: The "answer" field is shown directly to the user as a chat message.
+Do NOT include your reasoning process, deliberation, planning steps, or
+meta-commentary about JSON format in it. Write only the final message you
+want the user to read. If you are thinking about how to structure the JSON
+or which ops to emit, that is internal — keep it out of "answer".
 ${needsBlock}`;
   },
 
@@ -198,7 +204,26 @@ robust, and maintainable. Follow these patterns:
   question, not just show the first numeric column you found.
 - If the user's request is ambiguous (e.g. "analyze the data" without
   specifics), make reasonable choices in "answer" and plan ops that cover
-  the most likely intent. Do not refuse — build something useful.`;
+  the most likely intent. Do not refuse — build something useful.
+- NEVER guess column letters on a sheet marked [LAYOUT: multiblock]. The
+  columns are not a flat table — guessing which column holds which value
+  will produce wrong formulas and #N/A errors. Instead:
+  1. Find a clean tabular sheet with the same data (e.g. "Detalle",
+     "CeCo ... Detalle" — transaction-level sheets with one record per
+     row, headers in a single row).
+  2. Use that sheet as the source for a recipe or SUMIFS formulas.
+  3. If no clean tabular sheet exists, tell the user in "answer" that the
+     data needs normalizing first, and offer to build a normalization
+     sheet using raw ops.
+- When the user asks you to FIX a broken dashboard or table that you
+  (or a previous run) created, do NOT hand-patch individual cells with
+  guessed formulas. Instead, REBUILD it correctly:
+  1. Delete the broken sheet (or clear its contents).
+  2. Identify the correct source sheet (clean tabular, not multiblock).
+  3. Use a recipe to rebuild from scratch.
+  Hand-patching keeps the broken structure and just changes formulas —
+  the layout, headers, and formatting are still wrong. Rebuilding with a
+  recipe fixes everything at once.`;
   },
 
   /**
