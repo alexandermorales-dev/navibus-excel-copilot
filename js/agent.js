@@ -145,13 +145,15 @@ const Agent = {
         repairs++;
         phase('repairing', I18n.tf('repairing', problems.length));
 
+        const description = await Ops.describeProblems({
+          dropped: validation.dropped,
+          failed: exec.failed,
+          problems: verification.problems
+        });
+
         const repaired = await this._repair({
           userText, snap, lang, signal, stats, onThinking, onProvider,
-          description: Ops.describeProblems({
-            dropped: validation.dropped,
-            failed: exec.failed,
-            problems: verification.problems
-          })
+          description
         });
         if (!repaired.ok || !repaired.plan) break;
 

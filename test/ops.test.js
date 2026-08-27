@@ -321,9 +321,9 @@ test('validate: recipe target sheet collision is renamed', () => {
 
 /* ---------- problem description for the repair call ---------- */
 
-test('describeProblems: renders each category compactly', () => {
+test('describeProblems: renders each category compactly', async () => {
   const { Ops } = setup();
-  const text = Ops.describeProblems({
+  const text = await Ops.describeProblems({
     dropped: [{ op: 'write_range', reason: 'Sheet "X" does not exist' }],
     failed: [{ op: 'create_chart', args: { sheet: 'P', range: 'A1' }, error: 'boom' }],
     problems: [{ kind: 'formula_error', detail: '#REF! in P!B4' }]
@@ -331,4 +331,59 @@ test('describeProblems: renders each category compactly', () => {
   assert.match(text, /REJECTED write_range/);
   assert.match(text, /FAILED create_chart/);
   assert.match(text, /FORMULA_ERROR/);
+});
+
+/* ---------- merge_range alias ---------- */
+
+test('validate: merge_range is accepted and maps to format_range with merge:true', () => {
+  const { Ops } = setup();
+  const r = Ops.validate({ ops: [{ op: 'merge_range', sheet: 'Datos', range: 'A1:D1' }] }, snapshot());
+  assert.strictEqual(r.ops.length, 1);
+  assert.strictEqual(r.ops[0].op, 'merge_range');
+});
+
+test('validate: merge_range with extra format props is preserved', () => {
+  const { Ops } = setup();
+  const r = Ops.validate({
+    ops: [{ op: 'merge_range', sheet: 'Datos', range: 'A1:D1', bold: true, fillColor: '#1a237e' }]
+  }, snapshot());
+  assert.strictEqual(r.ops.length, 1);
+  // Validate stores raw args; the map function (which sets merge:true)
+  // runs at execution time. Verify the extra props survive validation.
+  assert.strictEqual(r.ops[0].bold, true);
+  assert.strictEqual(r.ops[0].fillColor, '#1a237e');
+  // Verify the SPEC map sets merge:true.
+  const spec = Ops.SPEC.merge_range;
+  const mapped = spec.map(r.ops[0]);
+  assert.strictEqual(mapped.merge, true);
+  assert.strictEqual(mapped.bold, true);
+});
+
+/* ---------- _extractCellRefs ---------- */
+
+test('_extractCellRefs: extracts sheet-qualified references', () => {
+  const { Ops } = setup();
+  const refs = Ops._extractCellRefs('#VALUE! in Dashboard!B27 (formula: =DC!D20/(DC!D20+DC!O20))');
+  assert.ok(refs.length >= 3);
+  // Should find DC!D20 (twice) and DC!O20
+  const dc = refs.filter(r => r.sheet === 'DC');
+  assert.ok(dc.length >= 2);
+  assert.ok(dc.some(r => r.cell === 'D20'));
+  assert.ok(dc.some(r => r.cell === 'O20'));
+});
+
+test('_extractCellRefs: handles quoted sheet names', () => {
+  const { Ops } = setup();
+  const refs = Ops._extractCellRefs("formula: ='My Sheet'!A1 + 'My Sheet'!B2");
+  assert.ok(refs.length >= 2);
+  assert.strictEqual(refs[0].sheet, 'My Sheet');
+  assert.strictEqual(refs[0].cell, 'A1');
+});
+
+test('_extractCellRefs: caps at 10 references', () => {
+  const { Ops } = setup();
+  let formula = 'formula: ';
+  for (let i = 1; i <= 20; i++) formula += `Data!A${i}+`;
+  const refs = Ops._extractCellRefs(formula);
+  assert.ok(refs.length <= 10);
 });

@@ -123,9 +123,31 @@ test('penalize: 429 sets a cooldown honouring Retry-After', () => {
   assert.ok(av.waitMs > 25000 && av.waitMs <= 30000);
 });
 
-test('penalize: a 429 streak escalates to day exhaustion', () => {
+test('penalize: 429 without Retry-After uses at least 60s cooldown (RPM window)', () => {
   const { Quota } = setup();
+  Quota.penalize('gemini', { status: 429 });
+  const av = Quota.availability('gemini', 100);
+  assert.strictEqual(av.reason, 'cooldown');
+  assert.ok(av.waitMs >= 55000, `expected >=55s cooldown, got ${av.waitMs}ms`);
+});
+
+test('penalize: rapid 429s do NOT cause day exhaustion (RPM protection)', () => {
+  const { Quota } = setup();
+  // Three 429s in rapid succession should only set cooldowns, not mark
+  // the provider as exhausted for the day. This is the RPM scenario:
+  // the provider just needs a minute to reset its rolling window.
   for (let i = 0; i < Quota.MAX_429_STREAK; i++) Quota.penalize('gemini', { status: 429 });
+  assert.strictEqual(Quota.availability('gemini', 100).reason, 'cooldown');
+});
+
+test('penalize: 429 after cooldown expired escalates to day exhaustion', () => {
+  const { Quota } = setup();
+  // Simulate: 429 → cooldown → wait for cooldown → 429 → cooldown → wait → 429
+  for (let i = 0; i < Quota.MAX_429_STREAK; i++) {
+    Quota.penalize('gemini', { status: 429 });
+    // Simulate the cooldown expiring before the next 429.
+    Quota._cooldownUntil.gemini = Date.now() - 1000;
+  }
   assert.strictEqual(Quota.availability('gemini', 100).reason, 'exhausted');
 });
 

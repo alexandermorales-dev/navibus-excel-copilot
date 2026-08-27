@@ -142,6 +142,19 @@ const Ops = {
     read_range: {
       tool: 'read_range', required: ['sheet', 'range'], sheetArg: 'sheet', readOnly: true,
       map: (a) => ({ sheet: a.sheet, range: a.range, what: a.what || 'values' })
+    },
+    // Alias: models frequently invent "merge_range" — map it to format_range
+    // with merge:true rather than dropping it as an unknown op.
+    merge_range: {
+      tool: 'format_range', required: ['sheet', 'range'], sheetArg: 'sheet',
+      map: (a) => {
+        const out = { sheet: a.sheet, range: a.range, merge: true };
+        for (const k of ['bold', 'fontSize', 'fontColor', 'fillColor',
+                         'horizontalAlignment', 'verticalAlignment', 'rowHeight']) {
+          if (a[k] !== undefined) out[k] = a[k];
+        }
+        return out;
+      }
     }
   },
 
@@ -664,8 +677,13 @@ const Ops = {
    * Compact, token-cheap description of what went wrong, for the repair
    * call. Only failures are included — successful ops are already applied
    * and re-sending them would invite duplicate work.
+   *
+   * For formula errors (#VALUE!, #REF!, etc.), the actual values of the
+   * referenced cells are read back so the model can understand WHY the
+   * formula failed and fix it — e.g. seeing that DC!D20 contains text
+   * explains the #VALUE! error.
    */
-  describeProblems({ dropped, failed, problems }) {
+  async describeProblems({ dropped, failed, problems }) {
     const lines = [];
     for (const d of (dropped || [])) {
       lines.push(`REJECTED ${d.op}: ${d.reason}`);
@@ -674,8 +692,73 @@ const Ops = {
       lines.push(`FAILED ${f.op}${f.args && f.args.range ? ` at ${f.args.sheet}!${f.args.range}` : ''}: ${f.error}`);
     }
     for (const p of (problems || [])) {
-      lines.push(`${p.kind.toUpperCase()}: ${p.detail}`);
+      let line = `${p.kind.toUpperCase()}: ${p.detail}`;
+      // For formula errors, read the referenced cells so the repair model
+      // can see what's actually there and derive a correct formula.
+      if (p.kind === 'formula_error' && p.sheet && p.address) {
+        const cellRefs = this._extractCellRefs(p.detail);
+        if (cellRefs.length > 0) {
+          const values = await this._readCellRefs(cellRefs);
+          if (values.length > 0) {
+            line += '\n  Referenced cell values:';
+            for (const v of values.slice(0, 8)) {
+              line += `\n    ${v.ref} = ${v.value}`;
+            }
+          }
+        }
+      }
+      lines.push(line);
     }
     return lines.join('\n');
+  },
+
+  /**
+   * Extract cell references (Sheet!A1 or A1) from a formula string.
+   */
+  _extractCellRefs(text) {
+    const refs = [];
+    // Match patterns like Sheet!A1, 'Sheet'!A1, Sheet!$A$1
+    const re = /(?:'([^']+)'!|([A-Za-z_][A-Za-z0-9_]*)!)?\$?([A-Z]{1,3})\$?(\d{1,7})/g;
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const sheet = m[1] || m[2] || null;
+      const col = m[3];
+      const row = m[4];
+      refs.push({ sheet, cell: `${col}${row}` });
+      if (refs.length >= 10) break;   // cap to keep the repair prompt small
+    }
+    return refs;
+  },
+
+  /**
+   * Read the actual values of referenced cells via Office.js.
+   */
+  async _readCellRefs(refs) {
+    // Group by sheet to minimize Office.js calls.
+    const bySheet = new Map();
+    for (const r of refs) {
+      const key = r.sheet || '';
+      if (!bySheet.has(key)) bySheet.set(key, []);
+      bySheet.get(key).push(r);
+    }
+
+    const results = [];
+    for (const [sheet, cells] of bySheet) {
+      if (!sheet) continue;   // can't read without a sheet name
+      // Read each cell individually — they're typically scattered.
+      for (const c of cells) {
+        try {
+          const res = await Tools.dispatch('read_range', { sheet, range: c.cell });
+          if (res.ok && res.result && res.result.data) {
+            const val = res.result.data[0] && res.result.data[0][0];
+            const display = val === null || val === undefined || val === ''
+              ? '(empty)'
+              : typeof val === 'string' ? `"${val}"` : String(val);
+            results.push({ ref: `${sheet}!${c.cell}`, value: display });
+          }
+        } catch (e) { /* skip unreadable cells */ }
+      }
+    }
+    return results;
   }
 };

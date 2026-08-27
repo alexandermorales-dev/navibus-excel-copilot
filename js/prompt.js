@@ -180,7 +180,16 @@ If the request does not fit a recipe, use the raw ops below.`;
 {"op":"delete_sheet","name":"S","userRequested":true}
 
 Ops run in order. Create a sheet before writing to it. Never autofit a
-dashboard sheet — recipes set deliberate column widths.`;
+dashboard sheet — recipes set deliberate column widths.
+
+## CRITICAL RULES FOR RAW OPS
+- NEVER reference a specific cell on another sheet (e.g. =Data!D20) unless
+  you know what it contains. Use SUMIF, AVERAGEIF, COUNTIF with column
+  ranges instead: =SUMIF(Data!$A$2:$A$500, A5, Data!$D$2:$D$500).
+- Charts need a data range that includes a header row. Anchor charts to
+  the RIGHT of tables (column E or later) and stack multiple charts
+  vertically with at least 16 rows between anchors to avoid overlap.
+- Use "merge":true in format_range to merge cells, not a separate op.`;
   },
 
   qaRules() {
@@ -224,6 +233,11 @@ Rules:
   already succeeded — they are already applied to the workbook.
 - A formula error (#REF!, #VALUE!, #NAME?, #DIV/0!) means a reference is
   wrong: re-derive it from the sheet names and column letters given.
+  Where "Referenced cell values" are shown, use them to understand WHY
+  the formula failed (e.g. a cell contains text, not a number).
+- Prefer SUMIF/AVERAGEIF/COUNTIF with column ranges over referencing
+  individual cells. =SUMIF(Data!$A$2:$A$500,A5,Data!$D$2:$D$500) is robust;
+  =Data!D20 is fragile and often produces #VALUE!.
 - If an op failed because a sheet or range does not exist, correct the
   name rather than retrying it unchanged.
 - If a problem cannot be fixed, leave it out and say so in "answer".

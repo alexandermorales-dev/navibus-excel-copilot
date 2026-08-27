@@ -32,6 +32,10 @@ const Quota = {
   _streak: {},
 
   MAX_429_STREAK: 3,   // consecutive 429s before we treat the day as spent
+  // Minimum cooldown for a 429 without a Retry-After header. Must be at
+  // least as long as the longest RPM window (60s) so RPM throttling does
+  // not burn through the streak counter in rapid succession.
+  MIN_429_COOLDOWN_MS: 60000,
 
   load() {
     const saved = Store.getJSON(this.STORAGE_KEY, null);
@@ -203,14 +207,28 @@ const Quota = {
     }
     if (status === 429) {
       this._streak[id] = (this._streak[id] || 0) + 1;
-      // Providers do not distinguish "too fast" from "out for the day" in
-      // the status code, so a persistent 429 streak is treated as spent.
-      if (this._streak[id] >= this.MAX_429_STREAK) {
+      // Distinguish RPM throttling (temporary, ~60s window) from RPD
+      // exhaustion (gone for the day). Providers return the same 429 for
+      // both, so we use the cooldown duration as a signal:
+      //   - If we get 429 AFTER a full cooldown expired, the provider is
+      //     genuinely spent → mark exhausted.
+      //   - If we get 429 in rapid succession (RPM), just extend the
+      //     cooldown; don't burn the day-level exhaustion flag.
+      const prevCooldown = this._cooldownUntil[id] || 0;
+      const waitedThroughCooldown = prevCooldown > 0 && Date.now() >= prevCooldown;
+
+      if (this._streak[id] >= this.MAX_429_STREAK && waitedThroughCooldown) {
         e.exhausted = true;
         this.save();
         return;
       }
-      const wait = retryAfterSec ? retryAfterSec * 1000 : Math.min(60000, 5000 * Math.pow(2, this._streak[id] - 1));
+
+      // Use Retry-After if provided; otherwise use at least 60s to cover
+      // the RPM window. Exponential backoff is capped at 5 minutes.
+      const baseWait = retryAfterSec
+        ? retryAfterSec * 1000
+        : Math.max(this.MIN_429_COOLDOWN_MS, 5000 * Math.pow(2, this._streak[id] - 1));
+      const wait = Math.min(baseWait, 300000);
       this._cooldownUntil[id] = Date.now() + wait;
       this.save();
       return;
