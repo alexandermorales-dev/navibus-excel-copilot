@@ -401,6 +401,56 @@ test('dashboard: never autofits its own sheet', async () => {
   assert.strictEqual(res.ops.filter(o => o.op === 'autofit').length, 0);
 });
 
+test('dashboard: works on titled sheets (headers not in row 1)', async () => {
+  const { Recipes } = setup();
+  // Simulate a titled sheet: headers in row 7, data from row 8.
+  const titledSnap = {
+    sheetCount: 1,
+    sheets: [{
+      name: 'CeCo', empty: false, rows: 100, cols: 6,
+      address: 'CeCo!B2:G100', hasHeaders: false,
+      layoutType: 'titled', headerRowIndex: 7,
+      headers: [],  // empty because hasHeaders was false
+      columnTypes: [], columnStats: [], sampleRows: []
+    }]
+  };
+  // Stub readRange: first call reads header row, then group-by col, then value col.
+  let call = 0;
+  const ctx = {
+    snap: titledSnap,
+    readRange: async (sheet, range) => {
+      call++;
+      if (call === 1) {
+        // Header row read: return headers
+        return { ok: true, data: [['Fecha', 'Region', 'Producto', 'Cantidad', 'Importe', 'Margen']], truncated: false };
+      }
+      if (call === 2) {
+        // Type inference sample read
+        return { ok: true, data: [['2025-01-01', 'Norte', 'A', 10, 1000, 0.1]], truncated: false };
+      }
+      if (call === 3) {
+        // Group-by column read (aggregate)
+        return { ok: true, data: REGIONS.map(c => [c]), truncated: false };
+      }
+      // Value column read (numeric check)
+      return { ok: true, data: REGIONS.map((_, i) => [100 + i * 10]), truncated: false };
+    }
+  };
+  const res = await Recipes.dashboard({
+    op: 'recipe.dashboard',
+    sheet: 'Panel',
+    title: 'TEST',
+    source: { sheet: 'CeCo' },
+    kpis: [{ label: 'Total', column: 'Importe', agg: 'sum' }],
+    groupBy: 'Region',
+    valueColumn: 'Importe',
+    agg: 'sum',
+    charts: [{ type: 'columnClustered', title: 'A' }]
+  }, ctx);
+  assert.strictEqual(res.ok, true, `expected ok, got: ${res.error}`);
+  assert.ok(res.ops.length > 0, 'expected ops to be generated');
+});
+
 /* ---------- summary_table recipe ---------- */
 
 test('summary_table: produces a titled, formatted table with no charts', async () => {

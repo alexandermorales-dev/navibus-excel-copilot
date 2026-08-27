@@ -85,16 +85,65 @@ const Recipes = {
     if (!desc || desc.empty) {
       return { ok: false, error: `Source sheet "${sheetName}" is empty` };
     }
-    if (!desc.hasHeaders) {
-      return { ok: false, error: `Source sheet "${sheetName}" has no header row, so columns cannot be resolved by name` };
+
+    // For titled sheets, headers are not in row 1 but headerRowIndex
+    // tells us where they are. For tabular sheets, hasHeaders is true
+    // and we use the used range start row. For anything else, bail.
+    if (!desc.hasHeaders && desc.layoutType !== 'titled') {
+      return { ok: false, error: `Source sheet "${sheetName}" has no header row (layout: ${desc.layoutType || 'unknown'}), so columns cannot be resolved by name` };
     }
 
-    // Trust the sheet's real used range over any range the model supplied:
-    // it is authoritative and avoids off-by-N row errors.
     const bounds = Schema.parseAddress(desc.address) || { startRow: 1, endRow: desc.rows };
-    const headerRow = bounds.startRow || 1;
+
+    // For titled sheets, use the detected header row index. For tabular
+    // sheets, use the used range start row (usually 1).
+    const headerRow = desc.layoutType === 'titled' && desc.headerRowIndex
+      ? desc.headerRowIndex
+      : (bounds.startRow || 1);
     const firstData = headerRow + 1;
     const lastData = bounds.endRow || desc.rows;
+
+    // For titled sheets, we need to re-read headers from the detected
+    // header row since the snapshot's headers array is empty (hasHeaders
+    // was false). Use the sample rows or re-read if needed.
+    // The headers will be resolved by colRange using desc.headers — but
+    // for titled sheets, desc.headers is empty. We need to populate it.
+    if (desc.layoutType === 'titled' && (!desc.headers || desc.headers.length === 0)) {
+      // The snapshot didn't capture headers because hasHeaders was false.
+      // We need to read the header row from the sheet.
+      // This is handled by the caller via readRange — but colRange needs
+      // headers to work. We'll read them here.
+      // Actually, colRange uses desc.headers to find column letters by
+      // name. If headers is empty, it can't resolve columns. We need to
+      // populate headers from the header row.
+      // The snapshot's sampleRows may contain the header row if it was
+      // captured as a sample. But for titled sheets, sampleRows start
+      // from row 0 (since hasHeaders is false), so they may include
+      // the header row.
+      // Best approach: read the header row via readRange.
+      // But resolveSource is synchronous — it can't call readRange.
+      // Instead, we'll mark this and let the caller handle it.
+      // For now, return ok with the headerRow and let the recipe
+      // read headers when it needs them.
+      // Actually, the colRange method needs headers. Let's check if
+      // we can extract them from sampleRows.
+      // The snapshot for non-header sheets includes sampleRows starting
+      // from row 0. If the header row is row 7 (index 6), it may be
+      // in sampleRows[6] if SAMPLE_ROWS >= 7.
+      // This is fragile. Better to just read the header row.
+      // Since resolveSource can't be async, we'll return the info and
+      // let the dashboard/summaryTable methods handle header reading.
+      return {
+        ok: true,
+        sheet: sheetName,
+        desc,
+        headerRow,
+        firstData,
+        lastData,
+        rowCount: Math.max(0, lastData - firstData + 1),
+        needsHeaders: true  // signal that headers must be read
+      };
+    }
 
     return {
       ok: true,
@@ -124,9 +173,50 @@ const Recipes = {
   /* ----------------------------------------------------------
      recipe.dashboard
      ---------------------------------------------------------- */
+  /**
+   * For titled sheets (headers not in row 1), read the header row
+   * and populate desc.headers so colRange can resolve column names.
+   */
+  async _ensureHeaders(src, ctx) {
+    if (!src.needsHeaders) return src;
+    const bounds = Schema.parseAddress(src.desc.address) || { startCol: 1 };
+    const startCol = bounds.startCol || 1;
+    const endCol = bounds.endCol || src.desc.cols;
+    const startLetter = Tools.colToLetter(startCol);
+    const endLetter = Tools.colToLetter(endCol);
+    const range = `${startLetter}${src.headerRow}:${endLetter}${src.headerRow}`;
+    const read = await ctx.readRange(src.sheet, range);
+    if (!read.ok || !read.data || !read.data[0]) {
+      return { ok: false, error: `Could not read header row ${src.headerRow} on "${src.sheet}": ${read.error || 'no data'}` };
+    }
+    // Populate headers on the desc object so colRange/columnIndex work.
+    src.desc.headers = read.data[0].map(v => String(v || ''));
+    // Also infer column types from data rows for formatFor().
+    if (!src.desc.columnTypes || src.desc.columnTypes.length === 0) {
+      // Read a few data rows to infer types.
+      const sampleRange = `${startLetter}${src.firstData}:${endLetter}${Math.min(src.firstData + 4, src.lastData)}`;
+      const sampleRead = await ctx.readRange(src.sheet, sampleRange);
+      if (sampleRead.ok && sampleRead.data) {
+        const types = [];
+        for (let c = 0; c < src.desc.headers.length; c++) {
+          const vals = sampleRead.data.map(r => r ? r[c] : null).filter(v => v !== null && v !== '' && v !== undefined);
+          const fmt = 'General';
+          types.push(Schema.guessType(vals, fmt));
+        }
+        src.desc.columnTypes = types;
+      }
+    }
+    delete src.needsHeaders;
+    return src;
+  },
+
   async dashboard(op, ctx) {
     const src = this.resolveSource(op, ctx);
     if (!src.ok) return { ok: false, error: src.error };
+
+    // For titled sheets, read the header row before resolving columns.
+    const headerReady = await this._ensureHeaders(src, ctx);
+    if (!headerReady.ok) return { ok: false, error: headerReady.error };
 
     const warnings = [];
     const ops = [];
@@ -291,6 +381,10 @@ const Recipes = {
   async summaryTable(op, ctx) {
     const src = this.resolveSource(op, ctx);
     if (!src.ok) return { ok: false, error: src.error };
+
+    // For titled sheets, read the header row before resolving columns.
+    const headerReady = await this._ensureHeaders(src, ctx);
+    if (!headerReady.ok) return { ok: false, error: headerReady.error };
 
     const breakdown = await this.aggregate(op, ctx, src);
     if (!breakdown.ok) return { ok: false, error: breakdown.error };

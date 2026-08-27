@@ -117,7 +117,9 @@ const Schema = {
     // Detect non-tabular layouts: multi-block columns, merged header rows,
     // or data starting several rows down. This helps the model choose the
     // right approach (recipe vs raw ops vs "normalize first").
-    const layoutType = this.detectLayout(values, isHeader, rowCount, colCount);
+    const layout = this.detectLayout(values, isHeader, rowCount, colCount);
+    const layoutType = layout.type;
+    const headerRowIndex = layout.headerRow || 0;
 
     let headers = [];
     let sampleRows = [];
@@ -159,6 +161,7 @@ const Schema = {
       cols: colCount,
       hasHeaders: isHeader,
       layoutType: layoutType,
+      headerRowIndex: headerRowIndex,
       headers: headers,
       columnTypes: columnTypes,
       columnStats: columnStats,
@@ -243,7 +246,7 @@ const Schema = {
    *   'unknown'    — can't determine, treat with caution
    */
   detectLayout(values, isHeader, rowCount, colCount) {
-    if (!values || values.length === 0) return 'unknown';
+    if (!values || values.length === 0) return { type: 'unknown', headerRow: 0 };
 
     // First, check for titled layout: first few rows are sparse, then
     // a header row appears. This takes priority over multiblock because
@@ -268,7 +271,8 @@ const Schema = {
               }
             }
             // If >70% of columns have data, it's titled tabular.
-            if (dataCols / colCount > 0.7) return 'titled';
+            // headerRow is 1-based (r is 0-based index into values).
+            if (dataCols / colCount > 0.7) return { type: 'titled', headerRow: r + 1 };
           }
           // Header found but data is sparse — could be multiblock with
           // a title above. Fall through to multiblock check.
@@ -308,16 +312,16 @@ const Schema = {
         for (let i = 1; i < emptyCols.length; i++) {
           if (emptyCols[i] - emptyCols[i - 1] > 1) blocks++;
         }
-        if (blocks >= 2) return 'multiblock';
+        if (blocks >= 2) return { type: 'multiblock', headerRow: 0 };
       }
     }
 
     // Check for very wide sheets (100+ cols) that aren't real tables —
     // often formatting artifacts or pivot cache sheets.
-    if (colCount > 100 && rowCount < 200) return 'unknown';
+    if (colCount > 100 && rowCount < 200) return { type: 'unknown', headerRow: 0 };
 
-    if (isHeader) return 'tabular';
-    return 'unknown';
+    if (isHeader) return { type: 'tabular', headerRow: 1 };
+    return { type: 'unknown', headerRow: 0 };
   },
 
   inferColumnTypes(colCount, values, formats, startRow = 1) {
