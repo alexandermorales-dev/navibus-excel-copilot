@@ -355,7 +355,16 @@ columns — narrower widths hide currency values.
 - Charts need a data range that includes a header row. Anchor charts to
   the RIGHT of tables (column E or later) and stack multiple charts
   vertically with at least 16 rows between anchors to avoid overlap.
-- Use "merge":true in format_range to merge cells, not a separate op.`;
+- Use "merge":true in format_range to merge cells, not a separate op.
+- When building from values read via "needs", you are writing literal
+  values (text and numbers) into cells. Track which cells have numbers
+  vs text. NEVER write a formula that does arithmetic on a cell that
+  contains text — it will produce #VALUE!. Use IFERROR and verify:
+  =IFERROR(B8/$B$10, 0) instead of =B8/$B$10.
+  =IFERROR(SUM(D8:D9), 0) instead of =SUM(D8:D9).
+- When writing values from "needs" data, put labels in one column and
+  numbers in the next column. Do NOT mix text and numbers in the same
+  column and then try to SUM or divide that column.`;
   },
 
   qaRules() {
