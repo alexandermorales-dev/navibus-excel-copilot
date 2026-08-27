@@ -27,9 +27,11 @@ const Providers = {
       chatUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
       modelsUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
       // Free tier limits as of Jul 2026 (per-model, not per-key):
-      //   gemini-3.6-flash:       15 RPM, 1500 RPD
-      //   gemini-3.5-flash:       15 RPM, 1500 RPD (same tier)
-      //   gemini-3.1-flash-lite:  15 RPM, 1000 RPD
+      //   gemini-3.6-flash:       15 RPM, 1500 RPD (best reasoning, free)
+      //   gemini-3.5-flash:       15 RPM, 1500 RPD (free, similar to 3.6)
+      //   gemini-3.5-flash-lite:  15 RPM, 1000 RPD (free, fast, high volume)
+      //   gemini-3.1-flash-lite:  15 RPM, 1000 RPD (free, workhorse)
+      //   gemini-*-pro-*:         NOT free tier — never select
       // We use the flash numbers as the pooled estimate since the
       // alternate-model fallback can tap its separate quota.
       limits: { rpd: 1500, rpm: 15, tpm: 250000 },
@@ -45,15 +47,24 @@ const Providers = {
           }
         }
       },
+      // Only free-tier models. Pro and preview models are excluded —
+      // they either have no free tier or lower limits that cause 402/403.
+      // Filter: drop Pro models (no free tier), TTS/image/embed variants.
+      modelFilter: (id) => !/\bpro\b/i.test(id) && !/tts|image|embed|aqa|guard|veo/i.test(id),
       models: {
-        plan:   [/^models\/gemini-[\d.]+-flash$/i, /flash(?!-lite)/i, /flash-lite/i, /pro/i],
-        answer: [/flash-lite/i, /flash/i],
-        repair: [/flash-lite/i, /flash/i]
+        // Plan needs reasoning — prefer full flash over lite.
+        // First try current versions, then any flash (not lite), then lite.
+        plan:   [/^models\/gemini-3\.6-flash$/i, /^models\/gemini-3\.5-flash$/i,
+                 /^gemini-3\.6-flash$/i, /^gemini-3\.5-flash$/i,
+                 /flash(?!-lite)/i, /flash-lite/i],
+        // Answer/repair need speed, not deep reasoning — prefer lite.
+        answer: [/flash-lite/i, /flash(?!-lite)/i],
+        repair: [/flash-lite/i, /flash(?!-lite)/i]
       },
       fallbackModels: {
-        plan:   ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
-        answer: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'],
-        repair: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
+        plan:   ['gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite'],
+        answer: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash'],
+        repair: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-3.6-flash']
       }
     },
 
