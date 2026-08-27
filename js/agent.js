@@ -25,7 +25,7 @@
 
 const Agent = {
   MAX_REPAIRS: 2,
-  PLAN_MAX_TOKENS: 12000,
+  PLAN_MAX_TOKENS: 16000,
   REPAIR_MAX_TOKENS: 3000,
   ANSWER_MAX_TOKENS: 800,
   MAX_PLAN_RETRIES: 3,       // total attempts = 1 + MAX_PLAN_RETRIES
@@ -228,7 +228,8 @@ const Agent = {
         temperature: attempt === 0 ? 0.2 : 0.4,  // nudge creativity up on retry
         signal,
         onThinking,
-        onProvider
+        onProvider,
+        noThinking: true  // thinking tokens count toward max_tokens on Gemini
       });
 
       stats.calls++;

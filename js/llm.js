@@ -36,7 +36,8 @@ const LLM = {
     const {
       role = 'plan', systemPrompt, messages, json = false,
       maxTokens = 8192, temperature = 0.3, tools,
-      signal, onText, onThinking, onProvider
+      signal, onText, onThinking, onProvider,
+      noThinking = false
     } = opts;
 
     const estTokens = Quota.estimateTokens(systemPrompt) +
@@ -80,7 +81,7 @@ const LLM = {
 
       const result = await this._callOnce({
         route, systemPrompt, messages, json, maxTokens, temperature, tools,
-        signal, onText, onThinking
+        signal, onText, onThinking, noThinking
       });
 
       if (result.ok) {
@@ -161,7 +162,7 @@ const LLM = {
   /**
    * A single request against one provider.
    */
-  async _callOnce({ route, systemPrompt, messages, json, maxTokens, temperature, tools, signal, onText, onThinking }) {
+  async _callOnce({ route, systemPrompt, messages, json, maxTokens, temperature, tools, signal, onText, onThinking, noThinking }) {
     const { provider, model } = route;
     const key = Config.keyFor(provider.id);
     if (!key) return { ok: false, error: 'No key configured', errorType: 'client' };
@@ -181,7 +182,18 @@ const LLM = {
     }
     // Provider-specific request fields (e.g. Gemini's thinking_config).
     // OpenAI-compatible providers silently ignore unknown fields.
-    if (provider.requestExtras) Object.assign(body, provider.requestExtras);
+    // When noThinking is set (e.g. plan calls), strip thinking_config to
+    // save tokens — thinking tokens count toward max_tokens on Gemini,
+    // which can truncate the actual JSON output.
+    if (provider.requestExtras) {
+      const extras = JSON.parse(JSON.stringify(provider.requestExtras));
+      if (noThinking && extras.extra_body && extras.extra_body.google) {
+        delete extras.extra_body.google.thinking_config;
+        if (Object.keys(extras.extra_body.google).length === 0) delete extras.extra_body.google;
+        if (Object.keys(extras.extra_body).length === 0) delete extras.extra_body;
+      }
+      Object.assign(body, extras);
+    }
 
     let attemptBody = body;
 
