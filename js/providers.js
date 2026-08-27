@@ -26,9 +26,13 @@ const Providers = {
       keyPlaceholder: 'AIza...',
       chatUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
       modelsUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
-      // Generous token ceiling — the best fit for planning calls that
-      // carry a full workbook snapshot.
-      limits: { rpd: 1000, rpm: 15, tpm: 250000 },
+      // Free tier limits as of Dec 2025 (per-model, not per-key):
+      //   gemini-2.5-flash:       10 RPM,  250 RPD
+      //   gemini-2.5-flash-lite:  15 RPM, 1000 RPD
+      //   gemini-3.5-flash:       10 RPM,  250 RPD (estimated, same tier)
+      // We use the flash-lite numbers as the pooled estimate since the
+      // alternate-model fallback can tap its separate quota.
+      limits: { rpd: 250, rpm: 10, tpm: 250000 },
       jsonMode: true,
       // Highest priority: most headroom per request.
       priority: 1,
