@@ -131,6 +131,9 @@ const LLM = {
       body.tools = tools;
       body.tool_choice = 'auto';
     }
+    // Provider-specific request fields (e.g. Gemini's thinking_config).
+    // OpenAI-compatible providers silently ignore unknown fields.
+    if (provider.requestExtras) Object.assign(body, provider.requestExtras);
 
     let attemptBody = body;
 
@@ -267,10 +270,18 @@ const LLM = {
           if (onText) onText(delta.content, fullText);
         }
 
+        // Gemini's OpenAI-compatible endpoint returns reasoning_content as
+        // an object {text: "..."} (or {signature: "..."}), not a plain
+        // string like Groq/DeepSeek. Handle both shapes.
         const reasoningChunk = delta.reasoning || delta.reasoning_content;
         if (reasoningChunk) {
-          fullReasoning += reasoningChunk;
-          if (onThinking) onThinking(fullReasoning);
+          const text = typeof reasoningChunk === 'string'
+            ? reasoningChunk
+            : (reasoningChunk.text || '');
+          if (text) {
+            fullReasoning += text;
+            if (onThinking) onThinking(fullReasoning);
+          }
         }
 
         if (delta.tool_calls) {

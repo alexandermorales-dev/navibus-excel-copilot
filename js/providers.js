@@ -32,6 +32,15 @@ const Providers = {
       jsonMode: true,
       // Highest priority: most headroom per request.
       priority: 1,
+      // Gemini's OpenAI-compatible endpoint needs this to return thought
+      // summaries in the stream. Without it, reasoning deltas are never sent.
+      requestExtras: {
+        extra_body: {
+          google: {
+            thinking_config: { include_thoughts: true }
+          }
+        }
+      },
       models: {
         plan:   [/^models\/gemini-[\d.]+-flash$/i, /flash(?!-lite)/i, /flash-lite/i, /pro/i],
         answer: [/flash-lite/i, /flash/i],

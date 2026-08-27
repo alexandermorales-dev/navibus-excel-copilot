@@ -121,16 +121,25 @@ const Intent = {
     const padded = ' ' + text + ' ';
     if (this._hasAny(padded, this.SUBSET_WORDS)) return null;
 
+    // Detect a specific sheet mention so we can restrict the search.
+    const scopeSheet = Context.detectSheetScope(userText, snap);
+
     // Row-count questions.
-    const rowCount = this._rowCountAnswer(padded, snap);
+    const rowCount = this._rowCountAnswer(padded, snap, scopeSheet);
     if (rowCount) return rowCount;
 
-    return this._aggregateAnswer(text, snap);
+    return this._aggregateAnswer(text, snap, scopeSheet);
   },
 
-  _rowCountAnswer(padded, snap) {
+  _rowCountAnswer(padded, snap, scopeSheet) {
     if (!this._hasAny(padded, this.AGGREGATES.count)) return null;
-    const sheets = snap.sheets.filter(s => !s.empty && !s.error && !s.isCopilotSheet);
+    let sheets = snap.sheets.filter(s => !s.empty && !s.error && !s.isCopilotSheet);
+    if (scopeSheet) {
+      // Restrict to the named sheet when the user specified one.
+      const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      const target = norm(scopeSheet);
+      sheets = sheets.filter(s => norm(s.name) === target);
+    }
     if (sheets.length !== 1) return null;   // ambiguous which sheet is meant
     const s = sheets[0];
     const dataRows = s.hasHeaders ? s.rows - 1 : s.rows;
@@ -145,9 +154,11 @@ const Intent = {
 
   /**
    * Match "<aggregate> of <column>" against a numeric column with exact
-   * precomputed statistics.
+   * precomputed statistics. When scopeSheet is provided, only that sheet
+   * is searched, so a column name shared across sheets doesn't produce a
+   * false match on the wrong sheet.
    */
-  _aggregateAnswer(text, snap) {
+  _aggregateAnswer(text, snap, scopeSheet) {
     let agg = null;
     for (const [name, words] of Object.entries(this.AGGREGATES)) {
       if (name === 'count') continue;
@@ -155,11 +166,15 @@ const Intent = {
     }
     if (!agg) return null;
 
-    // Find every numeric column across the workbook whose header appears
-    // in the question. A single unambiguous hit is required.
+    // Find every numeric column whose header appears in the question.
+    // A single unambiguous hit is required.
     const hits = [];
+    const norm = (s) => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const target = scopeSheet ? norm(scopeSheet) : null;
+
     for (const s of snap.sheets) {
       if (s.empty || s.error || !s.hasHeaders || !Array.isArray(s.columnStats)) continue;
+      if (target && norm(s.name) !== target) continue;   // restrict to scoped sheet
       for (let c = 0; c < s.headers.length; c++) {
         const st = s.columnStats[c];
         if (!st) continue;

@@ -139,6 +139,10 @@ const Context = {
   /**
    * Build the messages array for a planning call: snapshot plus request.
    * A single user message keeps the shape stable across providers.
+   *
+   * When the user text names a specific sheet, a SCOPE directive is
+   * appended so the model focuses on that sheet rather than referencing
+   * data from unrelated sheets in the workbook.
    */
   buildPlanMessages({ userText, snap, maxTokens, extra }) {
     const rendered = this.render(snap, { maxTokens });
@@ -149,14 +153,55 @@ const Context = {
       '## REQUEST',
       userText
     ];
+
+    // Detect a sheet name in the user's text and constrain scope.
+    const scopeSheet = this.detectSheetScope(userText, snap);
+    if (scopeSheet) {
+      parts.push('', '## SCOPE', `The user specifically referenced sheet "${scopeSheet}". Only read from and reference data on this sheet. Do not include data from other sheets unless the user explicitly asks for them.`);
+    }
+
     if (extra) {
       parts.push('', '## ADDITIONAL DATA', extra);
     }
     return {
       messages: [{ role: 'user', content: parts.join('\n') }],
       level: rendered.level,
-      tokens: rendered.tokens
+      tokens: rendered.tokens,
+      scopeSheet
     };
+  },
+
+  /**
+   * Detect whether the user text mentions a specific sheet by name.
+   * Matches case-insensitively and accent-insensitively, so "ventas"
+   * matches "Ventas" and "análisis" matches "Analisis".
+   *
+   * Returns the exact sheet name from the snapshot, or null.
+   */
+  detectSheetScope(userText, snap) {
+    if (!snap || !snap.sheets || !userText) return null;
+    const text = String(userText).toLowerCase();
+    const norm = (s) => String(s).toLowerCase()
+      .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    // Sort by name length descending so "Sales Data" matches before "Sales"
+    // when both exist and the user wrote "Sales Data".
+    const sorted = [...snap.sheets]
+      .filter(s => s.name && !s.empty && !s.error)
+      .sort((a, b) => String(b.name).length - String(a.name).length);
+
+    for (const s of sorted) {
+      const name = String(s.name);
+      // Require a whole-word match to avoid false positives on short names.
+      // "en la hoja Ventas" → match; "Investment" containing "in" → no match.
+      const pattern = new RegExp(`(^|[^a-z0-9])${this._escapeRegex(norm(name))}([^a-z0-9]|$)`, 'i');
+      if (pattern.test(norm(text))) return name;
+    }
+    return null;
+  },
+
+  _escapeRegex(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   },
 
   /**

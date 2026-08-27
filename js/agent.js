@@ -28,6 +28,8 @@ const Agent = {
   PLAN_MAX_TOKENS: 6000,
   REPAIR_MAX_TOKENS: 3000,
   ANSWER_MAX_TOKENS: 800,
+  MAX_PLAN_RETRIES: 2,       // total attempts = 1 + MAX_PLAN_RETRIES
+  RETRY_DELAY_MS: 500,
 
   /**
    * @param {object} opts
@@ -194,33 +196,129 @@ const Agent = {
     // Carry a little prior context so follow-ups ("now add a chart") work,
     // without replaying the whole transcript.
     const history = this._recentHistory(conversation);
-    const messages = [...history, ...built.messages];
+    const baseMessages = [...history, ...built.messages];
 
-    const res = await LLM.chat({
-      role: 'plan',
-      systemPrompt,
-      messages,
-      json: true,
-      maxTokens: this.PLAN_MAX_TOKENS,
-      temperature: 0.2,
-      signal,
-      onThinking,
-      onProvider
-    });
+    // Retry loop: recoverable failures (empty/unparseable response) get
+    // retried automatically with a nudge, so the user doesn't have to click
+    // "Retry" for transient model hiccups. Non-recoverable errors (auth,
+    // quota, abort) are returned immediately.
+    const RETRYABLE = new Set(['plan', 'empty']);
+    let lastError = I18n.t('badPlan');
+    let lastErrorType = 'plan';
 
-    stats.calls++;
-    if (res.usage && res.usage.total_tokens) stats.tokens += res.usage.total_tokens;
+    for (let attempt = 0; attempt <= this.MAX_PLAN_RETRIES; attempt++) {
+      if (signal && signal.aborted) return { ok: false, error: I18n.t('aborted'), errorType: 'aborted' };
 
-    if (!res.ok) return { ok: false, error: res.error, errorType: res.errorType };
+      const messages = attempt === 0
+        ? baseMessages
+        : [...baseMessages, {
+            role: 'assistant',
+            content: attempt === 1
+              ? I18n.t('retryNudge1')
+              : I18n.t('retryNudge2')
+          }];
 
-    const parsed = LLM.extractJSON(res.text);
-    if (!parsed.ok) {
-      console.warn('Agent: unparseable plan:', String(res.text || '').slice(0, 400));
-      return { ok: false, error: I18n.t('badPlan'), errorType: 'plan' };
+      const res = await LLM.chat({
+        role: 'plan',
+        systemPrompt,
+        messages,
+        json: true,
+        maxTokens: this.PLAN_MAX_TOKENS,
+        temperature: attempt === 0 ? 0.2 : 0.4,  // nudge creativity up on retry
+        signal,
+        onThinking,
+        onProvider
+      });
+
+      stats.calls++;
+      if (res.usage && res.usage.total_tokens) stats.tokens += res.usage.total_tokens;
+
+      if (!res.ok) {
+        // Non-retryable LLM errors: return immediately.
+        if (!RETRYABLE.has(res.errorType)) {
+          return { ok: false, error: res.error, errorType: res.errorType };
+        }
+        lastError = res.error;
+        lastErrorType = res.errorType;
+        console.warn(`Agent: plan attempt ${attempt + 1} failed (${res.errorType}), ${attempt < this.MAX_PLAN_RETRIES ? 'retrying' : 'giving up'}`);
+        if (attempt < this.MAX_PLAN_RETRIES) await this._delay(this.RETRY_DELAY_MS, signal);
+        continue;
+      }
+
+      const parsed = LLM.extractJSON(res.text);
+      if (!parsed.ok) {
+        console.warn(`Agent: unparseable plan (attempt ${attempt + 1}):`, String(res.text || '').slice(0, 400));
+        lastError = I18n.t('badPlan');
+        lastErrorType = 'plan';
+        if (attempt < this.MAX_PLAN_RETRIES) await this._delay(this.RETRY_DELAY_MS, signal);
+        continue;
+      }
+
+      // Validate the parsed plan for emptiness / nonsense (Issue 4).
+      const validation = this._validateResponse(parsed.value, snap, intent);
+      if (!validation.ok) {
+        console.warn(`Agent: response validation failed (attempt ${attempt + 1}): ${validation.reason}`);
+        lastError = validation.error;
+        lastErrorType = validation.errorType;
+        if (RETRYABLE.has(lastErrorType) && attempt < this.MAX_PLAN_RETRIES) {
+          await this._delay(this.RETRY_DELAY_MS, signal);
+          continue;
+        }
+      }
+
+      console.log(`Agent: plan from ${res.providerId}/${res.model} (snapshot detail: ${built.level}, ${built.tokens} tok, attempt ${attempt + 1})`);
+      return { ok: true, plan: parsed.value };
     }
 
-    console.log(`Agent: plan from ${res.providerId}/${res.model} (snapshot detail: ${built.level}, ${built.tokens} tok)`);
-    return { ok: true, plan: parsed.value };
+    return { ok: false, error: lastError, errorType: lastErrorType };
+  },
+
+  /**
+   * Validate a parsed plan for emptiness or nonsense before handing it to
+   * Ops.validate. Catches the cases where the model returned valid JSON
+   * but the content is useless — these would otherwise produce a confusing
+   * "no changes" message or a generic filler answer.
+   *
+   * Returns { ok: true } or { ok: false, error, errorType, reason }
+   */
+  _validateResponse(plan, snap, intent) {
+    if (!plan || typeof plan !== 'object') {
+      return { ok: false, error: I18n.t('badPlan'), errorType: 'plan', reason: 'not an object' };
+    }
+
+    const answer = typeof plan.answer === 'string' ? plan.answer.trim() : '';
+    const ops = Array.isArray(plan.ops) ? plan.ops : [];
+    const answerLower = answer.toLowerCase();
+
+    // Both empty: nothing to show the user.
+    if (!answer && ops.length === 0) {
+      return { ok: false, error: I18n.t('emptyResponse'), errorType: 'empty', reason: 'empty answer and ops' };
+    }
+
+    // The model echoed the JSON schema back instead of filling it in.
+    if (answerLower.startsWith('{"intent"') || answerLower.startsWith('{ "intent"')) {
+      return { ok: false, error: I18n.t('emptyResponse'), errorType: 'empty', reason: 'schema echoed in answer' };
+    }
+
+    // For questions: an answer is mandatory.
+    if (intent === 'qa' && !answer) {
+      return { ok: false, error: I18n.t('emptyResponse'), errorType: 'empty', reason: 'qa with no answer' };
+    }
+
+    // For build/edit: either an answer or ops must be non-empty.
+    if ((intent === 'build' || intent === 'edit') && !answer && ops.length === 0) {
+      return { ok: false, error: I18n.t('emptyResponse'), errorType: 'empty', reason: `${intent} with no answer and no ops` };
+    }
+
+    return { ok: true };
+  },
+
+  _delay(ms, signal) {
+    return new Promise(resolve => {
+      if (signal && signal.aborted) return resolve();
+      const id = setTimeout(resolve, ms);
+      if (signal) signal.addEventListener('abort', () => { clearTimeout(id); resolve(); }, { once: true });
+    });
   },
 
   async _repair({ userText, snap, lang, signal, stats, onThinking, onProvider, description }) {

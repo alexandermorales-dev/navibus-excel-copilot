@@ -187,6 +187,18 @@ const I18n = {
     emptyWorkbook: {
       es: 'El libro parece estar vacío. Agrega tus datos en Excel e inténtalo de nuevo.',
       en: 'The workbook looks empty. Add your data in Excel and try again.'
+    },
+    emptyResponse: {
+      es: 'El modelo devolvió una respuesta vacía. Reintentando automáticamente...',
+      en: 'The model returned an empty response. Retrying automatically...'
+    },
+    retryNudge1: {
+      es: 'Tu respuesta anterior estaba vacía o no era JSON válido. Devuelve SOLO un objeto JSON con los campos "answer" y "ops". No incluyas texto adicional.',
+      en: 'Your previous response was empty or not valid JSON. Return ONLY a JSON object with "answer" and "ops" fields. No additional text.'
+    },
+    retryNudge2: {
+      es: 'Último intento. Devuelve un objeto JSON válido: {"intent":"...","answer":"texto breve","ops":[...]}. El campo "answer" debe contener un mensaje real para el usuario, no el esquema.',
+      en: 'Final attempt. Return a valid JSON object: {"intent":"...","answer":"short message","ops":[...]}. The "answer" field must contain a real message for the user, not the schema.'
     }
   },
 

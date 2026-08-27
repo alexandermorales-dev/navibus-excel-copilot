@@ -147,3 +147,41 @@ test('parseStream: reports truncation via finish_reason length', async () => {
   const out = await LLM.parseStream(resp);
   assert.strictEqual(out.truncated, true);
 });
+
+test('parseStream: handles object-shaped reasoning_content (Gemini)', async () => {
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"reasoning_content":{"text":"Let me think"}}}]}\n\n',
+    'data: {"choices":[{"delta":{"reasoning_content":{"text":" about this"}}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.reasoning, 'Let me think about this');
+  assert.strictEqual(out.text, 'answer');
+});
+
+test('parseStream: handles reasoning_content with signature-only object', async () => {
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"reasoning_content":{"signature":"abc123"}}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"answer"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.reasoning, '');   // no text field → no reasoning text
+  assert.strictEqual(out.text, 'answer');
+});
+
+test('parseStream: onThinking callback fires with object reasoning_content', async () => {
+  let thinkingCalls = [];
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"reasoning_content":{"text":"step 1"}}}]}\n\n',
+    'data: {"choices":[{"delta":{"reasoning_content":{"text":" step 2"}}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp, null, (full) => thinkingCalls.push(full), null);
+  assert.strictEqual(thinkingCalls.length, 2);
+  assert.strictEqual(thinkingCalls[0], 'step 1');
+  assert.strictEqual(thinkingCalls[1], 'step 1 step 2');
+});
