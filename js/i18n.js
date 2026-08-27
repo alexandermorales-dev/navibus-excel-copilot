@@ -192,13 +192,17 @@ const I18n = {
       es: 'El modelo devolvió una respuesta vacía. Reintentando automáticamente...',
       en: 'The model returned an empty response. Retrying automatically...'
     },
+    truncatedPlan: {
+      es: 'La respuesta fue demasiado larga y se truncó. Usa recetas (recipe.dashboard, recipe.summary_table) en lugar de escribir datos celda por celda. Las recetas generan el layout automáticamente.',
+      en: 'The response was too long and got truncated. Use recipes (recipe.dashboard, recipe.summary_table) instead of writing data cell by cell. Recipes generate the layout automatically.'
+    },
     retryNudge1: {
       es: 'Tu respuesta anterior estaba vacía o no era JSON válido. Devuelve SOLO un objeto JSON con los campos "answer" y "ops". No incluyas texto adicional fuera del JSON. Si no puedes cumplir la solicitud, explica por qué en "answer" y deja "ops" vacío.',
       en: 'Your previous response was empty or not valid JSON. Return ONLY a JSON object with "answer" and "ops" fields. No text outside the JSON. If you cannot fulfill the request, explain why in "answer" and leave "ops" empty.'
     },
     retryNudge2: {
-      es: 'Intento 2. Devuelve un objeto JSON válido: {"intent":"...","answer":"texto breve","ops":[...]}. El campo "answer" debe contener un mensaje real para el usuario. No repitas el esquema.',
-      en: 'Attempt 2. Return a valid JSON object: {"intent":"...","answer":"short message","ops":[...]}. The "answer" field must contain a real message for the user. Do not repeat the schema.'
+      es: 'Intento 2. Devuelve un objeto JSON válido: {"intent":"...","answer":"texto breve","ops":[...]}. El campo "answer" debe contener un mensaje real para el usuario. No repitas el esquema. Usa recipe.dashboard o recipe.summary_table para dashboards y tablas — NO escribas los datos celda por celda.',
+      en: 'Attempt 2. Return a valid JSON object: {"intent":"...","answer":"short message","ops":[...]}. The "answer" field must contain a real message for the user. Do not repeat the schema. Use recipe.dashboard or recipe.summary_table for dashboards and tables — do NOT write data cell by cell.'
     },
     retryNudge3: {
       es: 'Último intento. Responde con un JSON mínimo: {"answer":"explica brevemente qué pasó","ops":[]}. Si no puedes hacer lo que pide el usuario, dilo en "answer".',

@@ -25,7 +25,7 @@
 
 const Agent = {
   MAX_REPAIRS: 2,
-  PLAN_MAX_TOKENS: 6000,
+  PLAN_MAX_TOKENS: 12000,
   REPAIR_MAX_TOKENS: 3000,
   ANSWER_MAX_TOKENS: 800,
   MAX_PLAN_RETRIES: 3,       // total attempts = 1 + MAX_PLAN_RETRIES
@@ -254,6 +254,10 @@ const Agent = {
           console.warn(`Agent: empty response (attempt ${attempt + 1}) — model returned only thinking, no answer`);
           lastError = I18n.t('emptyResponse');
           lastErrorType = 'empty';
+        } else if (res.truncated) {
+          console.warn(`Agent: truncated response (attempt ${attempt + 1}, ${res.text.length} chars) — plan too large`);
+          lastError = I18n.t('truncatedPlan');
+          lastErrorType = 'plan';
         } else {
           console.warn(`Agent: unparseable plan (attempt ${attempt + 1}):`, textPreview);
           lastError = I18n.t('badPlan');

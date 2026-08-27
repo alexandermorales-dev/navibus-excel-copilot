@@ -97,12 +97,22 @@ ${needsBlock}`;
 - Prefer live Excel formulas over pasted values, so results stay correct
   when the source data changes. A cell value starting with "=" is written
   as a formula.
+- NEVER paste source data into write_range values. The plan is a set of
+  instructions, not a data dump. Use formulas like =SUMIF(...) or
+  =Sheet!A2 to reference source data. Pasting hundreds of literal values
+  bloats the JSON and will truncate.
+- For dashboards, summaries, and aggregated tables, ALWAYS use a recipe
+  (recipe.dashboard, recipe.summary_table) instead of hand-building with
+  write_range + format_range ops. Recipes handle layout, formatting, and
+  chart placement automatically and produce compact JSON.
 - Never write a number you did not read or compute from the workbook.
 - Write output to a NEW sheet unless the user asked to modify an existing
   one. Give it a descriptive name ("Sales Dashboard", not "Sheet1").
 - Match number formats to column types: "#,##0" integers, "#,##0.00"
   decimals, "$#,##0.00" currency, "0.0%" percent, "yyyy-mm-dd" dates.
-- Keep the plan tight. Ten good ops beat forty redundant ones.`;
+- Keep the plan tight. Ten good ops beat forty redundant ones. If your
+  plan exceeds 20 ops, you are probably hand-building something a recipe
+  can do in one op.`;
   },
 
   /**
