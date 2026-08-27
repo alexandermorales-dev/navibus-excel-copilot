@@ -505,6 +505,7 @@ const Ops = {
         continue;
       }
       const expansion = await Recipes.expand(op, { snap, readRange });
+      console.log(`Ops: recipe ${op.op} expansion:`, expansion.ok ? `ok (${expansion.ops?.length} ops)` : `FAILED: ${expansion.error}`);
       if (!expansion.ok) {
         failed.push({ op: op.op, error: expansion.error });
         results.push({ op: op.op, ok: false, error: expansion.error, recipe: true });
