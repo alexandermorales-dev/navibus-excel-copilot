@@ -196,7 +196,7 @@ test('altModels: returns alternate models for the same provider', () => {
 
 test('altModels: returns empty when user has explicit override', () => {
   const { Providers, Config } = setup();
-  Config.setModelOverride('gemini', 'gemini-2.5-flash');
+  Config.setModelOverride('gemini', 'gemini-3.6-flash');
   const primary = Providers.resolveModel('gemini', 'plan');
   const alts = Providers.altModels('gemini', 'plan', primary);
   assert.strictEqual(alts.length, 0);
@@ -206,7 +206,7 @@ test('altModels: caps at 2 alternates', () => {
   const { Providers } = setup();
   // Populate discovered with many flash variants.
   Providers.discovered.gemini = [
-    'gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-2.5-flash-lite',
+    'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite',
     'gemini-3.5-flash-lite', 'gemini-flash-latest'
   ];
   const primary = Providers.resolveModel('gemini', 'plan');

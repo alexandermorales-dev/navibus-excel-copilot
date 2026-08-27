@@ -17,7 +17,7 @@ if (!key) {
   process.exit(1);
 }
 
-const MODEL = process.argv[3] || 'gemini-2.5-flash';
+const MODEL = process.argv[3] || 'gemini-3.6-flash';
 
 async function probe() {
   const noThinking = process.argv.includes('--no-thinking');

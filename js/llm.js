@@ -107,8 +107,8 @@ const LLM = {
       console.warn(`LLM: ${route.providerId}/${route.model} failed (${result.errorType}): ${result.error}`);
 
       // Before switching to a different provider, try alternate models
-      // within the same provider. A 429 on gemini-2.5-flash may not affect
-      // gemini-2.5-flash-lite (separate rate limits per model family).
+      // within the same provider. A 429 on gemini-3.6-flash may not affect
+      // gemini-3.1-flash-lite (separate rate limits per model family).
       // Only do this for rate-limit (429) and server errors — not for
       // auth failures (bad key affects all models) or content rejections.
       if ((result.errorType === 'rate_limit' || result.errorType === 'server') &&

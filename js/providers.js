@@ -26,13 +26,13 @@ const Providers = {
       keyPlaceholder: 'AIza...',
       chatUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
       modelsUrl: 'https://generativelanguage.googleapis.com/v1beta/openai/models',
-      // Free tier limits as of Dec 2025 (per-model, not per-key):
-      //   gemini-2.5-flash:       10 RPM,  250 RPD
-      //   gemini-2.5-flash-lite:  15 RPM, 1000 RPD
-      //   gemini-3.5-flash:       10 RPM,  250 RPD (estimated, same tier)
-      // We use the flash-lite numbers as the pooled estimate since the
+      // Free tier limits as of Jul 2026 (per-model, not per-key):
+      //   gemini-3.6-flash:       15 RPM, 1500 RPD
+      //   gemini-3.5-flash:       15 RPM, 1500 RPD (same tier)
+      //   gemini-3.1-flash-lite:  15 RPM, 1000 RPD
+      // We use the flash numbers as the pooled estimate since the
       // alternate-model fallback can tap its separate quota.
-      limits: { rpd: 250, rpm: 10, tpm: 250000 },
+      limits: { rpd: 1500, rpm: 15, tpm: 250000 },
       jsonMode: true,
       // Highest priority: most headroom per request.
       priority: 1,
@@ -51,9 +51,9 @@ const Providers = {
         repair: [/flash-lite/i, /flash/i]
       },
       fallbackModels: {
-        plan:   ['gemini-3.5-flash', 'gemini-2.5-flash'],
-        answer: ['gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'],
-        repair: ['gemini-3.5-flash-lite', 'gemini-2.5-flash-lite']
+        plan:   ['gemini-3.5-flash', 'gemini-3.1-flash-lite'],
+        answer: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'],
+        repair: ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite']
       }
     },
 
@@ -116,7 +116,7 @@ const Providers = {
 
   ROLES: ['plan', 'answer', 'repair'],
 
-  // Discovered model ids per provider: { gemini: ['gemini-2.5-flash', ...] }
+  // Discovered model ids per provider: { gemini: ['gemini-3.6-flash', ...] }
   discovered: {},
 
   ids() {
@@ -212,7 +212,7 @@ const Providers = {
   /**
    * Alternate models for the same provider/role, excluding the primary
    * model. Used for in-provider model fallback before switching to a
-   * different provider — e.g. try gemini-2.5-flash, then gemini-2.5-flash-lite,
+   * different provider — e.g. try gemini-3.6-flash, then gemini-3.1-flash-lite,
    * before jumping to Groq.
    *
    * Returns an array of model ids (may be empty).
