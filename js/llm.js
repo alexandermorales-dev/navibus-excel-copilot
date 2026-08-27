@@ -234,6 +234,14 @@ const LLM = {
     let usage = null;
     const toolCallMap = {};
 
+    // Gemini 3.x streams thinking as <thought>...</thought> tags inside
+    // the regular content field, with an extra_content marker:
+    //   extra_content: '{"google":{"thought":true}}'
+    // We track whether we're inside a <thought> block so we can route
+    // the text to the reasoning stream instead of the main text.
+    let inThoughtBlock = false;
+    let thoughtBuffer = '';   // accumulates raw content for tag parsing
+
     while (true) {
       if (signal && signal.aborted) break;
       const { done, value } = await reader.read();
@@ -265,14 +273,67 @@ const LLM = {
         const delta = choice.delta;
         if (!delta) continue;
 
+        /* --- Content + Gemini thought-tag parsing --- */
         if (delta.content) {
-          fullText += delta.content;
-          if (onText) onText(delta.content, fullText);
+          // Check extra_content for Gemini's thought marker.
+          let isThought = false;
+          if (delta.extra_content) {
+            try {
+              const ec = typeof delta.extra_content === 'string'
+                ? JSON.parse(delta.extra_content)
+                : delta.extra_content;
+              if (ec && ec.google && ec.google.thought) isThought = true;
+            } catch (e) { /* not JSON, ignore */ }
+          }
+
+          // Also detect <thought> tags in the content itself, since the
+          // opening tag and closing tag can appear in different chunks
+          // with/without the extra_content marker.
+          let text = delta.content;
+
+          // Process <thought> opening tags
+          while (true) {
+            const openIdx = text.indexOf('<thought>');
+            if (openIdx === -1) break;
+            // Text before the tag goes to the main stream
+            const before = text.slice(0, openIdx);
+            if (before) {
+              fullText += before;
+              if (onText) onText(before, fullText);
+            }
+            inThoughtBlock = true;
+            text = text.slice(openIdx + '<thought>'.length);
+          }
+
+          // Process </thought> closing tags
+          while (true) {
+            const closeIdx = text.indexOf('</thought>');
+            if (closeIdx === -1) break;
+            // Text before the closing tag goes to reasoning
+            const thoughtText = text.slice(0, closeIdx);
+            if (thoughtText) {
+              fullReasoning += thoughtText;
+              if (onThinking) onThinking(fullReasoning);
+            }
+            inThoughtBlock = false;
+            text = text.slice(closeIdx + '</thought>'.length);
+          }
+
+          // Route remaining text based on context
+          if (text) {
+            if (inThoughtBlock || isThought) {
+              fullReasoning += text;
+              if (onThinking) onThinking(fullReasoning);
+            } else {
+              fullText += text;
+              if (onText) onText(text, fullText);
+            }
+          }
         }
 
-        // Gemini's OpenAI-compatible endpoint returns reasoning_content as
-        // an object {text: "..."} (or {signature: "..."}), not a plain
-        // string like Groq/DeepSeek. Handle both shapes.
+        /* --- Standard reasoning_content (Groq, DeepSeek, etc.) --- */
+        // Also handle the reasoning_content field for providers that use
+        // it (Groq, DeepSeek). Gemini's older 2.x models may also use it.
         const reasoningChunk = delta.reasoning || delta.reasoning_content;
         if (reasoningChunk) {
           const text = typeof reasoningChunk === 'string'

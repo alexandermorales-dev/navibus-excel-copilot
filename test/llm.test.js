@@ -185,3 +185,79 @@ test('parseStream: onThinking callback fires with object reasoning_content', asy
   assert.strictEqual(thinkingCalls[0], 'step 1');
   assert.strictEqual(thinkingCalls[1], 'step 1 step 2');
 });
+
+/* ---------- Gemini <thought> tag parsing ---------- */
+
+test('parseStream: routes Gemini <thought> content to reasoning, not text', async () => {
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"content":"<thought>Let me think","extra_content":"{\\"google\\":{\\"thought\\":true}}","role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":" about this</thought>The answer is 391.","role":"assistant"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.reasoning, 'Let me think about this');
+  assert.strictEqual(out.text, 'The answer is 391.');
+});
+
+test('parseStream: handles <thought> tag split across chunks', async () => {
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"content":"<thought>step 1","extra_content":"{\\"google\\":{\\"thought\\":true}}","role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":" step 2","extra_content":"{\\"google\\":{\\"thought\\":true}}","role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":"</thought>Result","role":"assistant"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.reasoning, 'step 1 step 2');
+  assert.strictEqual(out.text, 'Result');
+});
+
+test('parseStream: handles thought without extra_content marker', async () => {
+  // Some chunks may not include extra_content but still have <thought> tags
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"content":"<thought>thinking","role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":" more</thought>answer","role":"assistant"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.reasoning, 'thinking more');
+  assert.strictEqual(out.text, 'answer');
+});
+
+test('parseStream: handles text before <thought> tag', async () => {
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"content":"Before thought <thought>the thinking</thought> after thought","role":"assistant"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.text, 'Before thought  after thought');
+  assert.strictEqual(out.reasoning, 'the thinking');
+});
+
+test('parseStream: onThinking fires for Gemini thought blocks', async () => {
+  let thinkingCalls = [];
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"content":"<thought>part 1","extra_content":"{\\"google\\":{\\"thought\\":true}}","role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"delta":{"content":" part 2</thought>done","role":"assistant"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  await LLM.parseStream(resp, null, (full) => thinkingCalls.push(full), null);
+  assert.ok(thinkingCalls.length >= 2);
+  assert.strictEqual(thinkingCalls[0], 'part 1');
+  assert.strictEqual(thinkingCalls[thinkingCalls.length - 1], 'part 1 part 2');
+});
+
+test('parseStream: thought_signature chunk does not corrupt output', async () => {
+  const resp = fakeResponse([
+    'data: {"choices":[{"delta":{"content":"<thought>thinking</thought>answer","role":"assistant"}}]}\n\n',
+    'data: {"choices":[{"delta":{"extra_content":"{\\"google\\":{\\"thought_signature\\":\\"abc123\\"}}","role":"assistant"}}]}\n\n',
+    'data: [DONE]\n\n'
+  ]);
+  const out = await LLM.parseStream(resp);
+  assert.strictEqual(out.ok, true);
+  assert.strictEqual(out.reasoning, 'thinking');
+  assert.strictEqual(out.text, 'answer');
+});

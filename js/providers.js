@@ -47,9 +47,9 @@ const Providers = {
         repair: [/flash-lite/i, /flash/i]
       },
       fallbackModels: {
-        plan:   ['gemini-2.5-flash', 'gemini-2.0-flash'],
-        answer: ['gemini-2.5-flash-lite', 'gemini-2.0-flash-lite'],
-        repair: ['gemini-2.5-flash-lite', 'gemini-2.0-flash-lite']
+        plan:   ['gemini-3.5-flash', 'gemini-2.5-flash'],
+        answer: ['gemini-3.5-flash-lite', 'gemini-2.5-flash-lite'],
+        repair: ['gemini-3.5-flash-lite', 'gemini-2.5-flash-lite']
       }
     },
 
