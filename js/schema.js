@@ -475,7 +475,7 @@ const Schema = {
 
       const copilotTag = s.isCopilotSheet ? ' [previous copilot output — not source data]' : '';
       const layout = s.layoutType && s.layoutType !== 'tabular'
-        ? ` [LAYOUT: ${s.layoutType}${s.layoutType === 'multiblock' ? ' — data is in side-by-side column blocks, NOT a flat table. Do NOT reference individual cells from this sheet (e.g. =DC!F8) — you cannot know which column holds which value. Do NOT use recipes on this sheet. Find a clean tabular sheet in this workbook with the same data and use that instead.' : s.layoutType === 'titled' ? ` — title rows at top, headers in row ${s.headerRowIndex}, data starts row ${s.headerRowIndex + 1}` : ' — non-standard layout, inspect sample rows carefully'}]`
+        ? ` [LAYOUT: ${s.layoutType}${s.layoutType === 'multiblock' ? ' — data is in side-by-side column blocks, NOT a flat table. Do NOT guess cell references. To use this sheet\'s data, request ranges via "needs" and the system will read the actual values for you. Do NOT use recipes on this sheet.' : s.layoutType === 'titled' ? ` — title rows at top, headers in row ${s.headerRowIndex}, data starts row ${s.headerRowIndex + 1}` : ' — non-standard layout, inspect sample rows carefully'}]`
         : '';
       lines.push(`  - "${s.name}": ${s.rows} rows x ${s.cols} cols, used range ${s.address}${copilotTag}${layout}`);
 

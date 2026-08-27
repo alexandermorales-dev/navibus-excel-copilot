@@ -94,7 +94,13 @@ const Agent = {
       let plan = planned.plan;
 
       /* ---------- 3b. One optional data-fetch round ---------- */
-      if (Array.isArray(plan.needs) && plan.needs.length > 0 && (!plan.ops || plan.ops.length === 0)) {
+      // The model can request data ranges via "needs" when it needs to read
+      // actual values from a sheet (e.g. a multiblock sheet with pre-aggregated
+      // data). The system reads those ranges and sends the values back in a
+      // second planning call. This triggers when needs is non-empty, regardless
+      // of whether ops were also emitted — the ops from the first call are
+      // discarded since the model will produce better ops with real data.
+      if (Array.isArray(plan.needs) && plan.needs.length > 0) {
         phase('reading');
         const extra = await this._fetchNeeds(plan.needs);
         const second = await this._plan({

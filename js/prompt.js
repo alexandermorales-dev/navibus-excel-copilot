@@ -73,10 +73,15 @@ ${langLine}`;
     const needsBlock = allowNeeds
       ? `
 If you cannot plan without seeing specific cell values that are not in the
-WORKBOOK description, return ONLY a needs request and no ops:
-{"intent":"${intent}","needs":[{"sheet":"Sales","range":"A1:D50"}]}
-Use this sparingly — the description already gives you every sheet name,
-column name, column type and exact numeric totals.`
+WORKBOOK description, return a needs request. You may include ops too —
+they will be discarded and you'll get a second planning call with the real
+values. This is the correct way to read data from a [LAYOUT: multiblock]
+sheet when the user asks to build from it:
+{"intent":"${intent}","needs":[{"sheet":"DC","range":"A1:I40"}],"ops":[]}
+Use this when the user asks to build something "based on" a multiblock
+sheet — the system reads the actual values and sends them back so you
+can write them into a new dashboard. Do NOT guess cell references in
+formulas; use "needs" to get the real values first.`
       : '';
 
     return `## OUTPUT
@@ -207,22 +212,27 @@ robust, and maintainable. Follow these patterns:
 - If the user's request is ambiguous (e.g. "analyze the data" without
   specifics), make reasonable choices in "answer" and plan ops that cover
   the most likely intent. Do not refuse — build something useful.
-- NEVER reference individual cells from a sheet marked [LAYOUT: multiblock]
-  (e.g. =DC!F8, =DC!B7). The columns are not a flat table — you cannot know
-  which column holds which value, and referencing cells will produce #VALUE!
-  and #N/A errors. Instead:
-  1. Look through the workbook description for another sheet with the same
-     data in [LAYOUT: tabular] or [LAYOUT: titled] form — typically a
-     transaction-level or detail sheet with one record per row.
-  2. Use that sheet as the source for a recipe or SUMIFS formulas.
-  3. If no clean tabular sheet exists, tell the user in "answer" that the
-     data needs normalizing first, and offer to build a normalization
-     sheet using raw ops.
-- When the user asks to build something "based on" or "from" a sheet that
-  is [LAYOUT: multiblock], do NOT build from that sheet. Find the clean
-  tabular sheet with the same underlying data and build from that. The
-  multiblock sheet is a presentation layer — the data lives in the flat
-  tabular sheet.
+- NEVER guess cell references on a sheet marked [LAYOUT: multiblock]
+  (e.g. =DC!F8, =DC!B7). The columns are not a flat table — guessing which
+  column holds which value will produce #VALUE! and #N/A errors.
+  Instead, choose ONE of these approaches:
+  A. If another sheet has the SAME data in [LAYOUT: tabular] or
+     [LAYOUT: titled] form, use that sheet as the source for a recipe
+     or SUMIFS formulas.
+  B. If the user explicitly asks to use the multiblock sheet's data
+     (e.g. "based on DC sheet"), use the "needs" field to request the
+     actual cell ranges from that sheet. The system will read the real
+     values and send them back to you. Then write those values into the
+     new dashboard using write_range ops. This is the correct approach
+     when the multiblock sheet contains pre-aggregated data that does
+     NOT exist in any tabular sheet.
+  C. If neither A nor B applies, tell the user in "answer" that the data
+     needs normalizing first.
+- IMPORTANT: A multiblock sheet may contain DIFFERENT data than any
+  tabular sheet (e.g. pre-aggregated daily costs vs transaction-level
+  detail). When the user asks for data "from" or "based on" a multiblock
+  sheet, do NOT substitute a tabular sheet unless you are certain it
+  contains the same data. If the values differ, use approach B above.
 - When the user asks you to FIX a broken dashboard or table that you
   (or a previous run) created, do NOT hand-patch individual cells with
   guessed formulas. Instead, REBUILD it correctly:
@@ -284,16 +294,16 @@ IMPORTANT: Recipes require a clean tabular source — headers in the first
 row, one record per row, no merged cells or interleaved header rows. If
 the source sheet has a non-tabular layout (data in blocks across
 multiple column groups, description rows between data, etc.), do NOT use
-a recipe. Instead, tell the user in "answer" that the data needs to be
-normalized into a flat table first, and offer to build a normalization
-sheet using raw ops.
+a recipe. Instead, use "needs" to read the actual values from the sheet,
+then write them into a new dashboard using raw write_range ops.
 
 SHEET LAYOUT TYPES (shown in the WORKBOOK description):
 - [LAYOUT: tabular] — clean flat table. Safe for recipes.
 - [LAYOUT: multiblock] — data in side-by-side column blocks. NOT a flat
-  table. Do NOT use recipes. If the user wants a dashboard from this,
-  find another sheet in the workbook with the same data in tabular form,
-  or offer to normalize the data first.
+  table. Do NOT use recipes. To build from this sheet, use "needs" to
+  request the cell ranges, then write the returned values into a new
+  sheet with write_range ops. Do NOT substitute a tabular sheet unless
+  it contains the SAME data.
 - [LAYOUT: titled] — title/info rows at top, real headers a few rows down.
   May work with recipes if you adjust the source range to start at the
   header row.
