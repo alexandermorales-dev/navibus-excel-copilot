@@ -104,7 +104,54 @@ const LLM = {
 
       lastError = result.error;
       lastErrorType = result.errorType;
-      console.warn(`LLM: ${route.providerId} failed (${result.errorType}): ${result.error}`);
+      console.warn(`LLM: ${route.providerId}/${route.model} failed (${result.errorType}): ${result.error}`);
+
+      // Before switching to a different provider, try alternate models
+      // within the same provider. A 429 on gemini-2.5-flash may not affect
+      // gemini-2.5-flash-lite (separate rate limits per model family).
+      // Only do this for rate-limit (429) and server errors — not for
+      // auth failures (bad key affects all models) or content rejections.
+      if ((result.errorType === 'rate_limit' || result.errorType === 'server') &&
+          !tried.includes(`${route.providerId}:alt`)) {
+        const alts = Providers.altModels(route.providerId, role, route.model);
+        for (const altModel of alts) {
+          if (signal && signal.aborted) break;
+          // Check if this alternate model has quota headroom (it shares
+          // the provider's ledger, but may have separate model-level limits).
+          const av = Quota.availability(route.providerId, estTokens);
+          if (!av.ok && av.reason !== 'cooldown') continue;   // exhausted/invalid → skip
+
+          console.log(`LLM: trying alternate model ${route.providerId}/${altModel}`);
+          if (onProvider) onProvider(route.provider.label, altModel, true);
+          tried.push(`${route.providerId}:alt`);
+
+          const altResult = await this._callOnce({
+            route: { ...route, model: altModel },
+            systemPrompt, messages, json, maxTokens, temperature, tools,
+            signal, onText, onThinking
+          });
+
+          if (altResult.ok) {
+            Quota.reward(route.providerId);
+            Quota.record(route.providerId, { tokens: altResult.usage?.total_tokens || estTokens });
+            return { ...altResult, providerId: route.providerId, model: altModel };
+          }
+
+          if (altResult.errorType !== 'aborted' && altResult.errorType !== 'network') {
+            Quota.record(route.providerId, { tokens: altResult.usage?.total_tokens || 0 });
+          }
+          if (altResult.errorType === 'aborted') return altResult;
+
+          Quota.penalize(route.providerId, {
+            status: altResult.status,
+            retryAfterSec: altResult.retryAfterSec
+          });
+
+          lastError = altResult.error;
+          lastErrorType = altResult.errorType;
+          console.warn(`LLM: alternate ${route.providerId}/${altModel} failed (${altResult.errorType}): ${altResult.error}`);
+        }
+      }
     }
 
     return { ok: false, error: lastError, errorType: lastErrorType };

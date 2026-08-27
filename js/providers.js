@@ -205,6 +205,48 @@ const Providers = {
     return fallback || null;
   },
 
+  /**
+   * Alternate models for the same provider/role, excluding the primary
+   * model. Used for in-provider model fallback before switching to a
+   * different provider — e.g. try gemini-2.5-flash, then gemini-2.5-flash-lite,
+   * before jumping to Groq.
+   *
+   * Returns an array of model ids (may be empty).
+   */
+  altModels(id, role, primaryModel) {
+    const p = this.get(id);
+    if (!p) return [];
+
+    // If the user set an explicit override, don't try alternates.
+    if (Config.modelOverride(id)) return [];
+
+    const available = this.discovered[id] || Config.loadDiscovered(id) || [];
+    const patterns = p.models[role] || p.models.plan || [];
+    const fallbacks = p.fallbackModels[role] || p.fallbackModels.plan || [];
+    const result = [];
+    const seen = new Set([primaryModel?.toLowerCase()]);
+
+    // Other pattern matches from discovered list.
+    for (const re of patterns) {
+      for (const m of available) {
+        if (re.test(m) && !seen.has(m.toLowerCase())) {
+          seen.add(m.toLowerCase());
+          result.push(m);
+        }
+      }
+    }
+
+    // Static fallbacks.
+    for (const m of fallbacks) {
+      if (!seen.has(m.toLowerCase())) {
+        seen.add(m.toLowerCase());
+        result.push(m);
+      }
+    }
+
+    return result.slice(0, 2);   // cap at 2 alternates
+  },
+
   _httpError(status, body) {
     const snippet = String(body || '').slice(0, 200);
     if (status === 401 || status === 403) return `Invalid or unauthorized key (${status})`;
